@@ -8,12 +8,15 @@ import { Input } from "@/components/ui/input"
 import { useChannel } from "@/contexts/ChannelContext"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useInView } from 'react-intersection-observer'
+import { MessageThread } from "./MessageThread"
 
 type Message = {
-  id?: number
+  id: number
   content: string
   createdAt: Date
   username: string
+  parentId: number | null
+  replyCount?: number
 }
 
 export default function ChatInterface() {
@@ -31,6 +34,7 @@ export default function ChatInterface() {
     top: number | null;
   } | null>(null);
   const [username, setUsername] = useState<string>("")
+  const [activeThread, setActiveThread] = useState<Message | null>(null)
 
   const { ref: topLoader, inView: isTopVisible } = useInView({
     threshold: 0,
@@ -183,15 +187,16 @@ export default function ChatInterface() {
       }));
     });*/
 
-    socketRef.current.on("new-message", (message: { chatId: string, content: string, username:string }) => {
+    socketRef.current.on("new-message", (message: { id: number,chatId: string, content: string, username:string, parentId: number | null }) => {
       console.log("new-message", message)
       setMessages(prevMessages => ({
         ...prevMessages,
         [message.chatId]: [...(prevMessages[message.chatId] || []), {
-          id: Date.now(),
+          id: message.id,
           content: message.content,
           createdAt: new Date(),
-          username: message.username
+          username: message.username,
+          parentId: message.parentId
         }]
       }))
     })
@@ -272,8 +277,14 @@ export default function ChatInterface() {
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
     if (inputMessage.trim() && socketRef.current && isConnected) {
-      const message = { chatId: currentChat.id, content: inputMessage }
-      socketRef.current.emit("send-message", message)
+      if (currentChat.type === "dm") {
+        socketRef.current.emit("send-dm", {
+          username: currentChat.name,
+          content: inputMessage
+        })
+      } else {
+        socketRef.current.emit("send-message", { chatId: currentChat.id, content: inputMessage })
+      }
       setInputMessage("")
     }
   }
@@ -289,20 +300,41 @@ export default function ChatInterface() {
       >
         <div ref={topLoader} className="h-16" />
         
-        {messages[currentChat.id]?.map((message, index) => (
-          <div 
-            key={index}
-            className="mb-2 p-2 rounded bg-white message-item"
-          >
-            <div className="font-semibold text-sm text-gray-600">
-              {message.username}
+        {messages[currentChat.id]?.filter(message => message.parentId === null).map((message) => (
+          <div key={message.id}>
+            <div 
+              className="mb-2 p-2 rounded bg-white message-item hover:bg-gray-50 cursor-pointer"
+              onClick={() => {
+                setActiveThread(activeThread?.id === message.id ? null : message)
+              }}
+              data-message-id={message.id}
+            >
+              <div className="font-semibold text-sm text-gray-600">
+                {message.username}
+              </div>
+              <div>{message.content}</div>
+              {message.replyCount && message.replyCount > 0 && (
+                <div className="text-sm text-gray-500 mt-1">
+                  {message.replyCount} replies
+                </div>
+              )}
             </div>
-            <div>{message.content}</div>
+            {activeThread && activeThread.id === message.id && (
+              <div className="ml-8 mb-4 border-l-2 border-gray-300">
+                <MessageThread
+                  socket={socketRef.current}
+                  parentMessage={activeThread}
+                  onClose={() => setActiveThread(null)}
+                  chatId={currentChat.id}
+                />
+              </div>
+            )}
           </div>
         ))}
 
         <div ref={bottomLoader} className="h-16" />
       </ScrollArea>
+      
       <form onSubmit={handleSendMessage} className="flex p-4 bg-gray-300">
         <Input
           type="text"

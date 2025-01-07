@@ -42,6 +42,7 @@ export async function GET(req: NextRequest) {
       const username = generateUsername()
       users.set(socket.id, { username })
       socket.emit("user-assigned", { username })
+      socket.join(`dm-${username}`)
 
       const connectedUsers = Array.from(users.values())
       global.socketServer.io?.emit("users-updated", connectedUsers)
@@ -62,7 +63,8 @@ export async function GET(req: NextRequest) {
             id: msg.id,
             content: msg.content,
             createdAt: msg.createdAt,
-            username: msg.username || 'unknown'
+            username: msg.username || 'unknown',
+            parentId: msg.parentId
           }))
         })
       })
@@ -101,20 +103,53 @@ export async function GET(req: NextRequest) {
         socket.leave(chatId)
       })
 
-      socket.on("send-message", async (message: { chatId: string, content: string }) => {
+      socket.on("send-dm", async (message: { 
+        username: string, 
+        content: string
+      }) => {
         const user = users.get(socket.id)
         if (!user) return
 
-        await db.insert(messages).values({
+        const newMessage = await db.insert(messages).values({
+          chatId: `dm-${[user.username, message.username].sort().join('-')}`,
+          content: message.content,
+          username: user.username,
+          parentId: null
+        }).returning()
+
+        global.socketServer.io?.to(`dm-${user.username}`).to(`dm-${message.username}`).emit("new-message", {
+          ...newMessage[0]
+        })
+      })
+
+      socket.on("send-message", async (message: { 
+        chatId: string, 
+        content: string,
+        parentId?: number
+      }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
+        const newMessage = await db.insert(messages).values({
           chatId: message.chatId,
           content: message.content,
-          username: user.username
-        })
-        
-        global.socketServer.io?.emit("new-message", {
-          ...message,
-          username: user.username
-        })
+          username: user.username,
+          parentId: message.parentId || null
+        }).returning()
+
+        console.log("Message sent:", message)
+
+        if (message.parentId) {
+          console.log("Emitting new-thread-message for thread-", message.parentId)
+          global.socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
+            ...newMessage[0]
+          })
+        } else {
+          console.log("Emitting new-message for chat-", message.chatId)
+          global.socketServer.io?.emit("new-message", {
+            ...newMessage[0]
+          })
+        }
       })
 
       socket.on("chat-history-back", async (data: { chatId: string, cursor: { date: string, id: number } }) => {
@@ -175,6 +210,31 @@ export async function GET(req: NextRequest) {
           })),
           hasMore: chatMessages.length === MESSAGES_PER_PAGE
         })
+      })
+
+      socket.on("join-thread", async (data: { messageId: number }) => {
+        const threadId = `thread-${data.messageId}`
+        socket.join(threadId)
+
+        const threadMessages = await db
+          .select()
+          .from(messages)
+          .where(eq(messages.parentId, data.messageId))
+          .orderBy(asc(messages.createdAt))
+
+        socket.emit("thread-history", {
+          messageId: data.messageId,
+          messages: threadMessages.map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            createdAt: msg.createdAt,
+            username: msg.username
+          }))
+        })
+      })
+
+      socket.on("leave-thread", (messageId: number) => {
+        socket.leave(`thread-${messageId}`)
       })
 
       socket.on("disconnect", () => {
