@@ -13,13 +13,14 @@ type Message = {
   id?: number
   content: string
   createdAt: Date
+  username: string
 }
 
 export default function ChatInterface() {
   const socketRef = useRef<Socket | null>(null)
   const scrollViewportRef = useRef<HTMLDivElement>(null)
   const [isConnected, setIsConnected] = useState(false)
-  const { currentChat } = useChannel()
+  const { currentChat, setConnectedUsers, setCurrentUser } = useChannel()
   const [messages, setMessages] = useState<{ [chatId: string]: Message[] }>({})
   const [hasMore, setHasMore] = useState<{ [chatId: string]: boolean }>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -29,6 +30,7 @@ export default function ChatInterface() {
     messageId: number | null;
     top: number | null;
   } | null>(null);
+  const [username, setUsername] = useState<string>("")
 
   const { ref: topLoader, inView: isTopVisible } = useInView({
     threshold: 0,
@@ -89,6 +91,10 @@ export default function ChatInterface() {
 
     socketRef.current.on("disconnect", () => {
       setIsConnected(false)
+    })
+
+    socketRef.current.on("users-updated", (users: { id: string; username: string }[]) => {
+      setConnectedUsers(users)
     })
 
     /*socketRef.current.on("chat-history-back", (data: { 
@@ -177,17 +183,23 @@ export default function ChatInterface() {
       }));
     });*/
 
-    socketRef.current.on("new-message", (message: { chatId: string, content: string }) => {
+    socketRef.current.on("new-message", (message: { chatId: string, content: string, username:string }) => {
+      console.log("new-message", message)
       setMessages(prevMessages => ({
         ...prevMessages,
         [message.chatId]: [...(prevMessages[message.chatId] || []), {
           id: Date.now(),
           content: message.content,
-          createdAt: new Date()
+          createdAt: new Date(),
+          username: message.username
         }]
       }))
     })
-  }, [])
+
+    socketRef.current.on("user-assigned", (data: { username: string, id: string }) => {
+      setCurrentUser({ username: data.username })
+    })
+  }, [setConnectedUsers])
 
   useEffect(() => {
     socketInitializer()
@@ -198,10 +210,16 @@ export default function ChatInterface() {
 
   useEffect(() => {
     if (socketRef.current && isConnected) {
-      socketRef.current.emit("join-chat", {
-        chatId: currentChat.id,
-        cursor: undefined
-      })
+      if (currentChat.type === "dm") {
+        socketRef.current.emit("join-dm", {
+          username: currentChat.name
+        })
+      } else {
+        socketRef.current.emit("join-chat", {
+          chatId: currentChat.id,
+          cursor: undefined
+        })
+      }
       return () => {
         socketRef.current?.emit("leave-chat", currentChat.id)
       }
@@ -276,7 +294,10 @@ export default function ChatInterface() {
             key={index}
             className="mb-2 p-2 rounded bg-white message-item"
           >
-            {message.content}
+            <div className="font-semibold text-sm text-gray-600">
+              {message.username}
+            </div>
+            <div>{message.content}</div>
           </div>
         ))}
 

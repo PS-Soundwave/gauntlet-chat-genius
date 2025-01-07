@@ -18,14 +18,17 @@ const channels: ChatItem[] = [
   { id: "5", name: "announcements", type: "channel" },
 ]
 
-const dms: ChatItem[] = [
-  { id: "dm1", name: "Alice", type: "dm" },
-  { id: "dm2", name: "Bob", type: "dm" },
-  { id: "dm3", name: "Charlie", type: "dm" },
-]
-
 export function Sidebar() {
-  const { currentChat, setCurrentChat } = useChannel()
+  const { currentChat, setCurrentChat, connectedUsers, currentUser } = useChannel()
+
+  // Convert connected users to DM chat items, excluding the current user
+  const dms: ChatItem[] = connectedUsers
+    .filter(user => user.username !== currentUser?.username)
+    .map(user => ({
+      id: `dm-${[currentUser?.username, user.username].sort().join('-')}`,
+      name: user.username,
+      type: "dm"
+    }))
 
   return (
     <div className={`${colors.secondary} w-64 h-screen p-4 flex flex-col`}>
@@ -56,7 +59,10 @@ export function Sidebar() {
               className={`w-full justify-start mb-1 ${
                 currentChat.id === dm.id ? colors.activeChannel : ""
               }`}
-              onClick={() => setCurrentChat(dm)}
+              onClick={() => {
+                console.log("Current chat:", currentChat)
+                setCurrentChat(dm)
+              }}
             >
               @ {dm.name}
             </Button>

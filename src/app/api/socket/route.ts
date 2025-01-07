@@ -3,6 +3,7 @@ import { NextRequest } from "next/server"
 import { db } from '@/db'
 import { messages } from '@/db/schema'
 import { eq, lt, desc, and, or, gt, asc } from 'drizzle-orm'
+import { generateUsername } from '@/utils/username'
 
 interface CustomGlobal {
   io?: SocketIOServer
@@ -18,6 +19,12 @@ if (!global.socketServer) {
 
 const MESSAGES_PER_PAGE = 50
 
+interface SocketUser {
+  username: string
+}
+
+const users = new Map<string, SocketUser>()
+
 export async function GET(req: NextRequest) {
   if (global.socketServer.io) {
     console.log("Socket is already running")
@@ -32,9 +39,14 @@ export async function GET(req: NextRequest) {
     global.socketServer.io.on("connection", (socket) => {
       console.log("Client connected")
       
-      socket.on("join-chat", async (data: { 
-        chatId: string
-      }) => {
+      const username = generateUsername()
+      users.set(socket.id, { username })
+      socket.emit("user-assigned", { username })
+
+      const connectedUsers = Array.from(users.values())
+      global.socketServer.io?.emit("users-updated", connectedUsers)
+      
+      socket.on("join-chat", async (data: { chatId: string }) => {
         console.log("Received join-chat:", data)
         socket.join(data.chatId)
       
@@ -44,14 +56,43 @@ export async function GET(req: NextRequest) {
             .where(eq(messages.chatId, data.chatId))
             .orderBy(asc(messages.createdAt))
       
-        console.log("fetched ", chatMessages.length, " messages")
-
         socket.emit("chat-history", {
           chatId: data.chatId,
           messages: chatMessages.map(msg => ({
             id: msg.id,
             content: msg.content,
-            createdAt: msg.createdAt
+            createdAt: msg.createdAt,
+            username: msg.username || 'unknown'
+          }))
+        })
+      })
+
+      socket.on("join-dm", async (data: { username: string }) => {
+        console.log("Received join-dm:", data)
+
+        const currentUser = users.get(socket.id)
+
+        if (data.username === currentUser?.username) {
+          return
+        }
+        
+        const chatId = `dm-${[currentUser?.username, data.username].sort().join('-')}`
+
+        socket.join(chatId)
+      
+        const chatMessages = await db
+            .select()
+            .from(messages)
+            .where(eq(messages.chatId, chatId))
+            .orderBy(asc(messages.createdAt))
+      
+        socket.emit("chat-history", {
+          chatId: chatId,
+          messages: chatMessages.map(msg => ({
+            id: msg.id,
+            content: msg.content,
+            createdAt: msg.createdAt,
+            username: msg.username || 'unknown'
           }))
         })
       })
@@ -61,12 +102,19 @@ export async function GET(req: NextRequest) {
       })
 
       socket.on("send-message", async (message: { chatId: string, content: string }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
         await db.insert(messages).values({
           chatId: message.chatId,
-          content: message.content
+          content: message.content,
+          username: user.username
         })
         
-        global.socketServer.io?.emit("new-message", message)
+        global.socketServer.io?.emit("new-message", {
+          ...message,
+          username: user.username
+        })
       })
 
       socket.on("chat-history-back", async (data: { chatId: string, cursor: { date: string, id: number } }) => {
@@ -127,6 +175,13 @@ export async function GET(req: NextRequest) {
           })),
           hasMore: chatMessages.length === MESSAGES_PER_PAGE
         })
+      })
+
+      socket.on("disconnect", () => {
+        users.delete(socket.id)
+
+        const connectedUsers = Array.from(users.values())
+        global.socketServer.io?.emit("users-updated", connectedUsers)
       })
     })
   }
