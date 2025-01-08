@@ -2,8 +2,9 @@ import { Server as SocketIOServer } from "socket.io"
 import { NextRequest } from "next/server"
 import { db } from '@/db'
 import { messages } from '@/db/schema'
-import { eq, lt, desc, and, or, gt, asc } from 'drizzle-orm'
+import { eq, lt, desc, and, or, gt, asc, sql } from 'drizzle-orm'
 import { generateUsername } from '@/utils/username'
+import { reactions } from '@/db/schema'
 
 interface CustomGlobal {
   io?: SocketIOServer
@@ -48,12 +49,26 @@ export async function GET(req: NextRequest) {
       
       socket.on("join-chat", async (data: { chatId: string }) => {
         socket.join(`channel-${data.chatId}`)
-      
-        const chatMessages = await db
-            .select()
-            .from(messages)
-            .where(eq(messages.chatId, `channel-${data.chatId}`))
-            .orderBy(asc(messages.createdAt))
+
+        const chatMessages = await db.query.messages.findMany({
+          columns: {
+            id: true,
+            content: true,
+            username: true,
+            createdAt: true,
+            parentId: true
+          },
+          where: eq(messages.chatId, `channel-${data.chatId}`),
+          with: {
+            reactions: {
+              columns: {
+                emoji: true,
+                username: true
+              }
+            }
+          },
+          orderBy: asc(messages.createdAt)
+        })
       
         socket.emit("chat-history", {
           chatId: data.chatId,
@@ -71,11 +86,26 @@ export async function GET(req: NextRequest) {
         const chatId = `dm-${[currentUser?.username, data.username].sort().join('-')}`
 
         socket.join(chatId)
-        const chatMessages = await db
-            .select()
-            .from(messages)
-            .where(eq(messages.chatId, chatId))
-            .orderBy(asc(messages.createdAt))
+
+        const chatMessages = await db.query.messages.findMany({
+          columns: {
+            id: true,
+            content: true,
+            username: true,
+            createdAt: true,
+            parentId: true
+          },
+          where: eq(messages.chatId, chatId),
+          with: {
+            reactions: {
+              columns: {
+                emoji: true,
+                username: true
+              }
+            }
+          },
+          orderBy: asc(messages.createdAt)
+        })
       
         socket.emit("chat-history", {
           chatId,
@@ -211,13 +241,20 @@ export async function GET(req: NextRequest) {
         const threadId = `thread-${data.messageId}`
         socket.join(threadId)
 
-        const threadMessages = await db
-          .select()
-          .from(messages)
-          .where(and(
+        const threadMessages = await db.query.messages.findMany({
+          where: and(
             eq(messages.chatId, `channel-${data.chatId}`),
-            eq(messages.parentId, data.messageId)))
-          .orderBy(asc(messages.createdAt))
+            eq(messages.parentId, data.messageId)),
+          with: {
+            reactions: {
+              columns: {
+                emoji: true,
+                username: true
+              }
+            }
+          },
+          orderBy: asc(messages.createdAt)
+        })
 
         socket.emit("thread-history", {
           messageId: data.messageId,
@@ -233,13 +270,20 @@ export async function GET(req: NextRequest) {
         const threadId = `${chatId}-thread-${data.messageId}`
         socket.join(threadId)
 
-        const threadMessages = await db
-          .select()
-          .from(messages)
-          .where(and(
+        const threadMessages = await db.query.messages.findMany({
+          where: and(
             eq(messages.chatId, chatId),
-            eq(messages.parentId, data.messageId)))
-          .orderBy(asc(messages.createdAt))
+            eq(messages.parentId, data.messageId)),
+          with: {
+            reactions: {
+              columns: {
+                emoji: true,
+                username: true
+              }
+            }
+          },
+          orderBy: asc(messages.createdAt)
+        })
 
         socket.emit("thread-history", {
           messageId: data.messageId,
@@ -260,6 +304,70 @@ export async function GET(req: NextRequest) {
 
         const connectedUsers = Array.from(users.values())
         global.socketServer.io?.emit("users-updated", connectedUsers)
+      })
+
+      socket.on("react-to-message", async (data: { 
+        messageId: number, 
+        emoji: string,
+        chatId: string,
+        parentId?: number,
+        type: 'channel' | 'dm'
+      }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
+        // Check if user already reacted with this emoji
+        const existingReaction = await db.select()
+          .from(reactions)
+          .where(and(
+            eq(reactions.messageId, data.messageId),
+            eq(reactions.username, user.username),
+            eq(reactions.emoji, data.emoji)
+          ))
+
+        if (existingReaction.length > 0) {
+          // Remove reaction
+          await db.delete(reactions)
+            .where(eq(reactions.id, existingReaction[0].id))
+        } else {
+          // Add reaction
+          await db.insert(reactions).values({
+            messageId: data.messageId,
+            username: user.username,
+            emoji: data.emoji
+          })
+        }
+
+        // Get updated reactions
+        const allReactions = await db
+          .select({
+            emoji: reactions.emoji,
+            username: reactions.username
+          })
+          .from(reactions)
+          .where(eq(reactions.messageId, data.messageId))
+
+
+        let room = null
+        if (data.type === 'dm') {
+          if (data.parentId) {
+            room = `dm-${[user.username, data.chatId].sort().join('-')}-thread-${data.parentId}`
+          } else {
+            room = `dm-${[user.username, data.chatId].sort().join('-')}`
+          }
+        } else if (data.parentId) {
+          room = `thread-${data.parentId}`
+        }
+        else {
+          room = `channel-${data.chatId}`
+        }
+
+        // Broadcast updated reactions to all clients in the chat
+        global.socketServer.io?.to(room).emit("reaction-updated", {
+          messageId: data.messageId,
+          chatId: data.chatId,
+          reactions: allReactions
+        })
       })
     })
   }

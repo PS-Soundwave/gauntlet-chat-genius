@@ -1,19 +1,23 @@
 import { useState, useEffect } from "react"
-import { Socket } from "socket.io-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { colors } from "@/utils/colors"
+import { Message } from "./Message"
+import { useSocket } from "@/contexts/SocketContext"
 
 type ThreadMessage = {
     id: number
     content: string
     createdAt: Date
     username: string
+    reactions?: {
+        emoji: string
+        username: string
+      }[]
 }
 
 type MessageThreadProps = {
-  socket: Socket | null
   parentMessage: ThreadMessage
   onClose: () => void
   chatId: string
@@ -22,10 +26,11 @@ type MessageThreadProps = {
 
 type ChannelType = "dm" | "channel"
 
-export function MessageThread({ socket, parentMessage, onClose, chatId, channelType }: MessageThreadProps) {
+export function MessageThread({ parentMessage, onClose, chatId, channelType }: MessageThreadProps) {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [inputMessage, setInputMessage] = useState("")
-
+  const { socket } = useSocket()
+  
   useEffect(() => {
     if (socket) {
         if (channelType === "dm") {
@@ -86,10 +91,16 @@ export function MessageThread({ socket, parentMessage, onClose, chatId, channelT
 
         <ScrollArea className="h-64 p-4">
           {messages.map((message) => (
-            <div key={message.id} className="mb-4">
-              <div className="font-semibold text-sm">{message.username}</div>
-              <div>{message.content}</div>
-            </div>
+            <Message
+              key={message.id}
+              username={message.username}
+              content={message.content}
+              className="mb-4"
+              reactions={message.reactions}
+              chatId={chatId}
+              messageId={message.id}
+              type={channelType}
+            />
           ))}
         </ScrollArea>
 

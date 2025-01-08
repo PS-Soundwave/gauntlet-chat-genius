@@ -1,14 +1,15 @@
 "use client"
 
 import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react"
-import { io, Socket } from "socket.io-client"
 import { colors } from "@/utils/colors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useChannel } from "@/contexts/ChannelContext"
+import { useSocket } from "@/contexts/SocketContext"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useInView } from 'react-intersection-observer'
 import { MessageThread } from "./MessageThread"
+import { Message } from "@/components/Message"
 
 type Message = {
   id: number
@@ -18,18 +19,21 @@ type Message = {
   parentId: number | null
   replyCount?: number
   chatId: string
+  reactions?: {
+    emoji: string
+    username: string
+  }[]
 }
 
 export default function ChatInterface() {
-  const socketRef = useRef<Socket | null>(null)
   const scrollViewportRef = useRef<HTMLDivElement>(null)
-  const [isConnected, setIsConnected] = useState(false)
   const { currentChat, setConnectedUsers, setCurrentUser } = useChannel()
+  const { socket, isConnected } = useSocket()
   const [messages, setMessages] = useState<{ [chatId: string]: Message[] }>({})
   const [hasMore, setHasMore] = useState<{ [chatId: string]: boolean }>({})
   const [isLoading, setIsLoading] = useState(false)
   const [inputMessage, setInputMessage] = useState("")
-  const [resetIsLoading, setResetIsLoading] = useState(false);
+  const [resetIsLoading, setResetIsLoading] = useState(false)
   const [scrollAnchor, setScrollAnchor] = useState<{
     messageId: number | null;
     top: number | null;
@@ -47,14 +51,13 @@ export default function ChatInterface() {
   })
 
   const loadMoreMessagesBack = useCallback(() => {
-    if (isLoading) return
+    if (isLoading || !socket) return
 
     const oldestMessage = messages[currentChat.id]?.[0]
     
     if (oldestMessage) {
       setIsLoading(true)
-
-      socketRef.current?.emit("chat-history-back", {
+      socket.emit("chat-history-back", {
         chatId: currentChat.id,
         cursor: {
           date: oldestMessage.createdAt,
@@ -62,7 +65,7 @@ export default function ChatInterface() {
         }
       })
     }
-  }, [currentChat.id, messages, hasMore, isLoading])
+  }, [currentChat.id, messages, isLoading, socket])
 
   const loadMoreMessagesForward = useCallback(() => {
     if (isLoading) return
@@ -72,7 +75,7 @@ export default function ChatInterface() {
     if (newestMessage) {
       setIsLoading(true)
 
-      socketRef.current?.emit("chat-history-forward", {
+      socket?.emit("chat-history-forward", {
         chatId: currentChat.id,
         cursor: {
         date: newestMessage.createdAt,
@@ -82,23 +85,10 @@ export default function ChatInterface() {
     }
   }, [currentChat.id, messages, hasMore, isLoading])
 
-  const socketInitializer = useCallback(async () => {
-    await fetch("/api/socket")
-    socketRef.current = io("http://localhost:3001", {
-      transports: ['websocket'],
-      upgrade: false
-    })
+  useEffect(() => {
+    if (!socket) return
 
-    socketRef.current.on("connect", () => {
-      console.log("Connected to WebSocket")
-      setIsConnected(true)
-    })
-
-    socketRef.current.on("disconnect", () => {
-      setIsConnected(false)
-    })
-
-    socketRef.current.on("users-updated", (users: { id: string; username: string }[]) => {
+    socket.on("users-updated", (users: { id: string; username: string }[]) => {
       setConnectedUsers(users)
     })
 
@@ -140,7 +130,7 @@ export default function ChatInterface() {
       }));
     });*/
 
-    socketRef.current.on("chat-history", (data: { 
+    socket.on("chat-history", (data: { 
       chatId: string, 
       messages: Message[]
     }) => {
@@ -158,7 +148,6 @@ export default function ChatInterface() {
       const viewport = scrollViewportRef.current
       const lastVisibleMessage = [...(viewport?.querySelectorAll('.message-item') || [])].pop()
       const lastVisibleRect = lastVisibleMessage?.getBoundingClientRect()
-
 
       for (const message of data.messages) {
         for (const message2 of messages[data.chatId] || []) {
@@ -188,48 +177,49 @@ export default function ChatInterface() {
       }));
     });*/
 
-    socketRef.current.on("new-message", (message: Message) => {
+    socket.on("new-message", (message: Message) => {
       setMessages(prevMessages => ({
         ...prevMessages,
         [message.chatId]: [...(prevMessages[message.chatId] || []), message]
       }))
     })
 
-    socketRef.current.on("user-assigned", (data: { username: string, id: string }) => {
+    socket.on("user-assigned", (data: { username: string, id: string }) => {
       setCurrentUser({ username: data.username })
     })
-  }, [setConnectedUsers])
 
-  useEffect(() => {
-    socketInitializer()
     return () => {
-      socketRef.current?.disconnect()
+      socket.off("users-updated")
+      socket.off("chat-history")
+      socket.off("new-message")
+      socket.off("user-assigned")
+      socket.off("reaction-updated")
     }
-  }, [socketInitializer])
+  }, [socket, setConnectedUsers, setCurrentUser])
 
   useEffect(() => {
-    if (socketRef.current && isConnected) {
+    if (socket && isConnected) {
       if (currentChat.type === "dm") {
-        socketRef.current.emit("join-dm", {
+        socket.emit("join-dm", {
           username: currentChat.name
         })
 
         return () => {
-          socketRef.current?.emit("leave-dm", {
+          socket.emit("leave-dm", {
             username: currentChat.id
           })
         }
       } else {
-        socketRef.current.emit("join-chat", {
+        socket.emit("join-chat", {
           chatId: currentChat.id
         })
 
         return () => {
-          socketRef.current?.emit("leave-chat", { chatId: currentChat.id })
+          socket.emit("leave-chat", { chatId: currentChat.id })
         }
       }
     }
-  }, [currentChat, isConnected])
+  }, [currentChat, isConnected, socket])
 
   /*useEffect(() => {
     if (isTopVisible && !isLoading) {
@@ -276,14 +266,14 @@ export default function ChatInterface() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
-    if (inputMessage.trim() && socketRef.current && isConnected) {
+    if (inputMessage.trim() && socket && isConnected) {
       if (currentChat.type === "dm") {
-        socketRef.current.emit("send-dm", {
+        socket.emit("send-dm", {
           username: currentChat.name,
           content: inputMessage
         })
       } else {
-        socketRef.current.emit("send-message", { chatId: currentChat.id, content: inputMessage })
+        socket.emit("send-message", { chatId: currentChat.id, content: inputMessage })
       }
       setInputMessage("")
     }
@@ -302,27 +292,20 @@ export default function ChatInterface() {
         
         {messages[currentChat.id]?.filter(message => message.parentId === null).map((message) => (
           <div key={message.id}>
-            <div 
-              className="mb-2 p-2 rounded bg-white message-item hover:bg-gray-50 cursor-pointer"
-              onClick={() => {
-                setActiveThread(activeThread?.id === message.id ? null : message)
-              }}
+            <Message
+              username={message.username}
+              content={message.content}
+              onClick={() => setActiveThread(activeThread?.id === message.id ? null : message)}
+              replyCount={message.replyCount}
               data-message-id={message.id}
-            >
-              <div className="font-semibold text-sm text-gray-600">
-                {message.username}
-              </div>
-              <div>{message.content}</div>
-              {message.replyCount && message.replyCount > 0 && (
-                <div className="text-sm text-gray-500 mt-1">
-                  {message.replyCount} replies
-                </div>
-              )}
-            </div>
+              reactions={message.reactions}
+              chatId={currentChat.type === "dm" ? currentChat.name : currentChat.id}
+              messageId={message.id}
+              type={currentChat.type}
+            />
             {activeThread && activeThread.id === message.id && (
               <div className="ml-8 mb-4 border-l-2 border-gray-300">
                 <MessageThread
-                  socket={socketRef.current}
                   parentMessage={activeThread}
                   onClose={() => setActiveThread(null)}
                   chatId={currentChat.type === "dm" ? currentChat.name : currentChat.id}
