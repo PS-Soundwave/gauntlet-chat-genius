@@ -6,10 +6,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { colors } from "@/utils/colors"
 
 type ThreadMessage = {
-  id: number
-  content: string
-  createdAt: Date
-  username: string
+    id: number
+    content: string
+    createdAt: Date
+    username: string
 }
 
 type MessageThreadProps = {
@@ -17,32 +17,41 @@ type MessageThreadProps = {
   parentMessage: ThreadMessage
   onClose: () => void
   chatId: string
+  channelType: ChannelType
 }
 
-export function MessageThread({ socket, parentMessage, onClose, chatId }: MessageThreadProps) {
+type ChannelType = "dm" | "channel"
+
+export function MessageThread({ socket, parentMessage, onClose, chatId, channelType }: MessageThreadProps) {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [inputMessage, setInputMessage] = useState("")
 
   useEffect(() => {
     if (socket) {
-        socket.emit("join-thread", { messageId: parentMessage.id })
+        if (channelType === "dm") {
+            socket.emit("join-dm-thread", { messageId: parentMessage.id, username: chatId })
+        } else {
+            socket.emit("join-thread", { messageId: parentMessage.id, chatId })
+        }
 
         socket.on("thread-history", (data: { messageId: number, messages: ThreadMessage[] }) => {
-        if (data.messageId === parentMessage.id) {
             setMessages(data.messages)
-        }
         })
 
         socket.on("new-thread-message", (message: ThreadMessage) => {
-        setMessages(prev => [...prev, message])
+            setMessages(prev => [...prev, message])
         })
 
         return () => {
-        if (socket) {
-            socket.emit("leave-thread", parentMessage.id)
-            socket.off("thread-history")
-            socket.off("new-thread-message")
-        }
+            if (socket) {
+                if (channelType === "dm") {
+                    socket.emit("leave-dm-thread", { messageId: parentMessage.id, username: chatId })
+                } else {
+                    socket.emit("leave-thread", parentMessage.id)
+                }
+                socket.off("thread-history")
+                socket.off("new-thread-message")
+            }
         }
     }
   }, [socket, parentMessage.id])
@@ -50,12 +59,19 @@ export function MessageThread({ socket, parentMessage, onClose, chatId }: Messag
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
     if (inputMessage.trim() && socket) {
-        console.log("Emitting send-message for thread-", parentMessage.id)
-        socket.emit("send-message", {
-            chatId,
-            content: inputMessage,
-            parentId: parentMessage.id
-        })
+        if (channelType === "dm") {
+            socket.emit("send-dm", {
+                username: chatId,
+                content: inputMessage,
+                parentId: parentMessage.id
+            })
+        } else {
+            socket.emit("send-message", {
+                chatId,
+                content: inputMessage,
+                parentId: parentMessage.id
+            })
+        }
         setInputMessage("")
     }
   }

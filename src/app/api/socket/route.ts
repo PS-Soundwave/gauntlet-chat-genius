@@ -42,36 +42,26 @@ export async function GET(req: NextRequest) {
       const username = generateUsername()
       users.set(socket.id, { username })
       socket.emit("user-assigned", { username })
-      socket.join(`dm-${username}`)
 
       const connectedUsers = Array.from(users.values())
       global.socketServer.io?.emit("users-updated", connectedUsers)
       
       socket.on("join-chat", async (data: { chatId: string }) => {
-        console.log("Received join-chat:", data)
-        socket.join(data.chatId)
+        socket.join(`channel-${data.chatId}`)
       
         const chatMessages = await db
             .select()
             .from(messages)
-            .where(eq(messages.chatId, data.chatId))
+            .where(eq(messages.chatId, `channel-${data.chatId}`))
             .orderBy(asc(messages.createdAt))
       
         socket.emit("chat-history", {
           chatId: data.chatId,
-          messages: chatMessages.map(msg => ({
-            id: msg.id,
-            content: msg.content,
-            createdAt: msg.createdAt,
-            username: msg.username || 'unknown',
-            parentId: msg.parentId
-          }))
+          messages: chatMessages
         })
       })
 
       socket.on("join-dm", async (data: { username: string }) => {
-        console.log("Received join-dm:", data)
-
         const currentUser = users.get(socket.id)
 
         if (data.username === currentUser?.username) {
@@ -81,7 +71,6 @@ export async function GET(req: NextRequest) {
         const chatId = `dm-${[currentUser?.username, data.username].sort().join('-')}`
 
         socket.join(chatId)
-      
         const chatMessages = await db
             .select()
             .from(messages)
@@ -89,37 +78,45 @@ export async function GET(req: NextRequest) {
             .orderBy(asc(messages.createdAt))
       
         socket.emit("chat-history", {
-          chatId: chatId,
-          messages: chatMessages.map(msg => ({
-            id: msg.id,
-            content: msg.content,
-            createdAt: msg.createdAt,
-            username: msg.username || 'unknown'
-          }))
+          chatId,
+          messages: chatMessages
         })
       })
 
-      socket.on("leave-chat", (chatId: string) => {
-        socket.leave(chatId)
+      socket.on("leave-chat", (data: { chatId: string }) => {
+        socket.leave(`channel-${data.chatId}`)
+      })
+
+      socket.on("leave-dm", (data: { username: string }) => {
+        socket.leave(`dm-${[data.username, users.get(socket.id)?.username].sort().join('-')}`)
       })
 
       socket.on("send-dm", async (message: { 
         username: string, 
-        content: string
+        content: string,
+        parentId?: number
       }) => {
         const user = users.get(socket.id)
         if (!user) return
 
+        const chatId = `dm-${[user.username, message.username].sort().join('-')}`
+
         const newMessage = await db.insert(messages).values({
-          chatId: `dm-${[user.username, message.username].sort().join('-')}`,
+          chatId,
           content: message.content,
           username: user.username,
-          parentId: null
+          parentId: message.parentId || null
         }).returning()
 
-        global.socketServer.io?.to(`dm-${user.username}`).to(`dm-${message.username}`).emit("new-message", {
-          ...newMessage[0]
-        })
+        if (message.parentId) {
+          global.socketServer.io?.to(`${chatId}-thread-${message.parentId}`).emit("new-thread-message", {
+            ...newMessage[0]
+          })
+        } else {
+          global.socketServer.io?.to(chatId).emit("new-message", {
+            ...newMessage[0]
+          })
+        }
       })
 
       socket.on("send-message", async (message: { 
@@ -131,28 +128,26 @@ export async function GET(req: NextRequest) {
         if (!user) return
 
         const newMessage = await db.insert(messages).values({
-          chatId: message.chatId,
+          chatId: `channel-${message.chatId}`,
           content: message.content,
           username: user.username,
           parentId: message.parentId || null
         }).returning()
 
-        console.log("Message sent:", message)
-
         if (message.parentId) {
-          console.log("Emitting new-thread-message for thread-", message.parentId)
           global.socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
-            ...newMessage[0]
+            ...newMessage[0],
+            chatId: message.chatId
           })
         } else {
-          console.log("Emitting new-message for chat-", message.chatId)
           global.socketServer.io?.emit("new-message", {
-            ...newMessage[0]
+            ...newMessage[0],
+            chatId: message.chatId
           })
         }
       })
 
-      socket.on("chat-history-back", async (data: { chatId: string, cursor: { date: string, id: number } }) => {
+      /*socket.on("chat-history-back", async (data: { chatId: string, cursor: { date: string, id: number } }) => {
         console.log("Received chat-history-back:", data)
 
         const chatMessages = await db
@@ -180,9 +175,9 @@ export async function GET(req: NextRequest) {
           })),
           hasMore: chatMessages.length === MESSAGES_PER_PAGE
         })
-      })
+      })*/
 
-      socket.on("chat-history-forward", async (data: { chatId: string, cursor: { date: string, id: number } }) => {
+      /*socket.on("chat-history-forward", async (data: { chatId: string, cursor: { date: string, id: number } }) => {
         socket.join(data.chatId)
       
         const chatMessages = await db
@@ -210,32 +205,55 @@ export async function GET(req: NextRequest) {
           })),
           hasMore: chatMessages.length === MESSAGES_PER_PAGE
         })
-      })
+      })*/
 
-      socket.on("join-thread", async (data: { messageId: number }) => {
+      socket.on("join-thread", async (data: { messageId: number, chatId: string }) => {
         const threadId = `thread-${data.messageId}`
         socket.join(threadId)
 
         const threadMessages = await db
           .select()
           .from(messages)
-          .where(eq(messages.parentId, data.messageId))
+          .where(and(
+            eq(messages.chatId, `channel-${data.chatId}`),
+            eq(messages.parentId, data.messageId)))
           .orderBy(asc(messages.createdAt))
 
         socket.emit("thread-history", {
           messageId: data.messageId,
-          messages: threadMessages.map(msg => ({
-            id: msg.id,
-            content: msg.content,
-            createdAt: msg.createdAt,
-            username: msg.username
-          }))
+          messages: threadMessages
         })
       })
 
-      socket.on("leave-thread", (messageId: number) => {
-        socket.leave(`thread-${messageId}`)
+      socket.on("join-dm-thread", async (data: { messageId: number, username: string }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
+        const chatId = `dm-${[user.username, data.username].sort().join('-')}`
+        const threadId = `${chatId}-thread-${data.messageId}`
+        socket.join(threadId)
+
+        const threadMessages = await db
+          .select()
+          .from(messages)
+          .where(and(
+            eq(messages.chatId, chatId),
+            eq(messages.parentId, data.messageId)))
+          .orderBy(asc(messages.createdAt))
+
+        socket.emit("thread-history", {
+          messageId: data.messageId,
+          messages: threadMessages
+        })
       })
+
+      socket.on("leave-thread", (data: { messageId: number }) => {
+        socket.leave(`thread-${data.messageId}`)
+      })
+
+      socket.on("leave-dm-thread", (data: { messageId: number, username: string }) => {
+        socket.leave(`dm-${[data.username, users.get(socket.id)?.username].sort().join('-')}-thread-${data.messageId}`)
+      })  
 
       socket.on("disconnect", () => {
         users.delete(socket.id)

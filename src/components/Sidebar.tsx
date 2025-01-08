@@ -59,10 +59,7 @@ export function Sidebar() {
               className={`w-full justify-start mb-1 ${
                 currentChat.id === dm.id ? colors.activeChannel : ""
               }`}
-              onClick={() => {
-                console.log("Current chat:", currentChat)
-                setCurrentChat(dm)
-              }}
+              onClick={() => setCurrentChat(dm)}
             >
               @ {dm.name}
             </Button>

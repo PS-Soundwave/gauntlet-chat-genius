@@ -17,6 +17,7 @@ type Message = {
   username: string
   parentId: number | null
   replyCount?: number
+  chatId: string
 }
 
 export default function ChatInterface() {
@@ -187,17 +188,10 @@ export default function ChatInterface() {
       }));
     });*/
 
-    socketRef.current.on("new-message", (message: { id: number,chatId: string, content: string, username:string, parentId: number | null }) => {
-      console.log("new-message", message)
+    socketRef.current.on("new-message", (message: Message) => {
       setMessages(prevMessages => ({
         ...prevMessages,
-        [message.chatId]: [...(prevMessages[message.chatId] || []), {
-          id: message.id,
-          content: message.content,
-          createdAt: new Date(),
-          username: message.username,
-          parentId: message.parentId
-        }]
+        [message.chatId]: [...(prevMessages[message.chatId] || []), message]
       }))
     })
 
@@ -219,14 +213,20 @@ export default function ChatInterface() {
         socketRef.current.emit("join-dm", {
           username: currentChat.name
         })
+
+        return () => {
+          socketRef.current?.emit("leave-dm", {
+            username: currentChat.id
+          })
+        }
       } else {
         socketRef.current.emit("join-chat", {
-          chatId: currentChat.id,
-          cursor: undefined
+          chatId: currentChat.id
         })
-      }
-      return () => {
-        socketRef.current?.emit("leave-chat", currentChat.id)
+
+        return () => {
+          socketRef.current?.emit("leave-chat", { chatId: currentChat.id })
+        }
       }
     }
   }, [currentChat, isConnected])
@@ -325,7 +325,8 @@ export default function ChatInterface() {
                   socket={socketRef.current}
                   parentMessage={activeThread}
                   onClose={() => setActiveThread(null)}
-                  chatId={currentChat.id}
+                  chatId={currentChat.type === "dm" ? currentChat.name : currentChat.id}
+                  channelType={currentChat.type}
                 />
               </div>
             )}
