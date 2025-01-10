@@ -6,29 +6,21 @@ type MessageProps = {
   username: string
   content: string
   onClick?: () => void
-  replyCount?: number
   className?: string
-  chatId: string
   reactions?: {
     emoji: string
     username: string
   }[]
   messageId: number
-  parentId?: number
-  type: 'channel' | 'dm'
 }
 
-const commonEmojis = ["👍", "❤️", "😂", "😮", "😢", "🎉"]
+const commonEmojis = ["👍", "👎", "❤️", "😂", "😮", "😢", "🎉", "💯", "🔥"]
 
 export function Message({ 
   username, 
   content, 
   onClick, 
-  replyCount, 
   className = "",
-  chatId,
-  parentId,
-  type,
   reactions: initialReactions = [],
   messageId
 }: MessageProps) {
@@ -72,10 +64,7 @@ export function Message({
 
     socket.emit("react-to-message", {
       messageId,
-      emoji,
-      chatId,
-      parentId,
-      type
+      emoji
     })
   }
 
@@ -133,12 +122,6 @@ export function Message({
               {emoji}
             </button>
           ))}
-        </div>
-      )}
-
-      {replyCount && replyCount > 0 && (
-        <div className="text-sm text-gray-500 mt-1">
-          {replyCount} replies
         </div>
       )}
     </div>

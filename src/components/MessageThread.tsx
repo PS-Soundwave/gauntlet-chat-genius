@@ -97,9 +97,7 @@ export function MessageThread({ parentMessage, onClose, chatId, channelType }: M
               content={message.content}
               className="mb-4"
               reactions={message.reactions}
-              chatId={chatId}
               messageId={message.id}
-              type={channelType}
             />
           ))}
         </ScrollArea>

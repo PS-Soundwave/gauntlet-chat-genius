@@ -17,7 +17,6 @@ type Message = {
   createdAt: Date
   username: string
   parentId: number | null
-  replyCount?: number
   chatId: string
   reactions?: {
     emoji: string
@@ -296,12 +295,9 @@ export default function ChatInterface() {
               username={message.username}
               content={message.content}
               onClick={() => setActiveThread(activeThread?.id === message.id ? null : message)}
-              replyCount={message.replyCount}
               data-message-id={message.id}
               reactions={message.reactions}
-              chatId={currentChat.type === "dm" ? currentChat.name : currentChat.id}
               messageId={message.id}
-              type={currentChat.type}
             />
             {activeThread && activeThread.id === message.id && (
               <div className="ml-8 mb-4 border-l-2 border-gray-300">
