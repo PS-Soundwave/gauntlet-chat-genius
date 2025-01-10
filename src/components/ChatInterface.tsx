@@ -39,6 +39,7 @@ export default function ChatInterface() {
   } | null>(null);
   const [username, setUsername] = useState<string>("")
   const [activeThread, setActiveThread] = useState<Message | null>(null)
+  const [activeEmojiPicker, setActiveEmojiPicker] = useState<number | null>(null)
 
   const { ref: topLoader, inView: isTopVisible } = useInView({
     threshold: 0,
@@ -278,6 +279,18 @@ export default function ChatInterface() {
     }
   }
 
+  useEffect(() => {
+    const handleClickOutside = () => {
+      setActiveEmojiPicker(null)
+    }
+
+    window.addEventListener('click', handleClickOutside)
+
+    return () => {
+      window.removeEventListener('click', handleClickOutside)
+    }
+  }, [])
+
   return (
     <div className="flex flex-col h-screen">
       <div className={`${colors.primary} p-4 text-white font-semibold`}>
@@ -298,6 +311,8 @@ export default function ChatInterface() {
               data-message-id={message.id}
               reactions={message.reactions}
               messageId={message.id}
+              activeEmojiPicker={activeEmojiPicker}
+              setActiveEmojiPicker={setActiveEmojiPicker}
             />
             {activeThread && activeThread.id === message.id && (
               <div className="ml-8 mb-4 border-l-2 border-gray-300">
