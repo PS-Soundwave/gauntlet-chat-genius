@@ -185,7 +185,7 @@ export default function ChatInterface() {
     })
 
     socket.on("user-assigned", (data: { username: string, id: string }) => {
-      setCurrentUser({ username: data.username })
+      setCurrentUser({ username: data.username, id: data.id })
     })
 
     return () => {
@@ -201,7 +201,7 @@ export default function ChatInterface() {
     if (socket && isConnected) {
       if (currentChat.type === "dm") {
         socket.emit("join-dm", {
-          username: currentChat.name
+          id: currentChat.clerkId
         })
 
         return () => {
@@ -269,7 +269,7 @@ export default function ChatInterface() {
     if (inputMessage.trim() && socket && isConnected) {
       if (currentChat.type === "dm") {
         socket.emit("send-dm", {
-          username: currentChat.name,
+          username: currentChat.clerkId,
           content: inputMessage
         })
       } else {
@@ -319,8 +319,10 @@ export default function ChatInterface() {
                 <MessageThread
                   parentMessage={activeThread}
                   onClose={() => setActiveThread(null)}
-                  chatId={currentChat.type === "dm" ? currentChat.name : currentChat.id}
+                  chatId={currentChat.type === "dm" ? currentChat.clerkId ?? "" : currentChat.id}
                   channelType={currentChat.type}
+                  activeEmojiPicker={activeEmojiPicker}
+                  setActiveEmojiPicker={setActiveEmojiPicker}
                 />
               </div>
             )}

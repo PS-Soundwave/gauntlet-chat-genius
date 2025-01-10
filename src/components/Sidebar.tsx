@@ -7,15 +7,16 @@ import { useChannel } from "@/contexts/ChannelContext"
 type ChatItem = {
   id: string
   name: string
+  clerkId: string | null
   type: "channel" | "dm"
 }
 
 const channels: ChatItem[] = [
-  { id: "1", name: "general", type: "channel" },
-  { id: "2", name: "random", type: "channel" },
-  { id: "3", name: "project-a", type: "channel" },
-  { id: "4", name: "project-b", type: "channel" },
-  { id: "5", name: "announcements", type: "channel" },
+  { id: "1", name: "general", type: "channel", clerkId: null },
+  { id: "2", name: "random", type: "channel", clerkId: null },
+  { id: "3", name: "project-a", type: "channel", clerkId: null },
+  { id: "4", name: "project-b", type: "channel", clerkId: null },
+  { id: "5", name: "announcements", type: "channel", clerkId: null },
 ]
 
 export function Sidebar() {
@@ -23,12 +24,15 @@ export function Sidebar() {
 
   // Convert connected users to DM chat items, excluding the current user
   const dms: ChatItem[] = connectedUsers
-    .filter(user => user.username !== currentUser?.username)
+    .filter(user => user.id !== currentUser?.id)
     .map(user => ({
-      id: `dm-${[currentUser?.username, user.username].sort().join('-')}`,
+      id: `dm-${[currentUser?.id, user.id].sort().join('-')}`,
       name: user.username,
+      clerkId: user.id,
       type: "dm"
     }))
+
+    console.log(dms)
 
   return (
     <div className={`${colors.secondary} w-64 h-screen p-4 flex flex-col`}>

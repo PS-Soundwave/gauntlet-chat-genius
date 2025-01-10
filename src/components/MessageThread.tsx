@@ -22,11 +22,13 @@ type MessageThreadProps = {
   onClose: () => void
   chatId: string
   channelType: ChannelType
+  activeEmojiPicker: number | null
+  setActiveEmojiPicker: (messageId: number | null) => void
 }
 
 type ChannelType = "dm" | "channel"
 
-export function MessageThread({ parentMessage, onClose, chatId, channelType }: MessageThreadProps) {
+export function MessageThread({ parentMessage, onClose, chatId, channelType, activeEmojiPicker, setActiveEmojiPicker }: MessageThreadProps) {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const { socket } = useSocket()
@@ -98,6 +100,8 @@ export function MessageThread({ parentMessage, onClose, chatId, channelType }: M
               className="mb-4"
               reactions={message.reactions}
               messageId={message.id}
+              activeEmojiPicker={activeEmojiPicker}
+              setActiveEmojiPicker={setActiveEmojiPicker}
             />
           ))}
         </ScrollArea>

@@ -37,7 +37,7 @@ export function Message({
   const reactionTable = reactions.reduce((acc: { [key: string]: { count: number, userReacted: boolean } }, reaction) => {
     acc[reaction.emoji] = {
         count: (acc[reaction.emoji]?.count || 0) + 1,
-        userReacted: acc[reaction.emoji]?.userReacted || reaction.username === currentUser?.username
+        userReacted: acc[reaction.emoji]?.userReacted || reaction.username === currentUser?.id
     }
     return acc
   }, {})

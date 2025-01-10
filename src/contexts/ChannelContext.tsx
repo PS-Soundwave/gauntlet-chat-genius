@@ -5,6 +5,7 @@ import React, { createContext, useState, useContext } from "react"
 type ChatItem = {
   id: string
   name: string
+  clerkId: string | null
   type: "channel" | "dm"
 }
 
@@ -13,8 +14,8 @@ type ChannelContextType = {
   setCurrentChat: (chat: ChatItem) => void
   connectedUsers: { id: string; username: string }[]
   setConnectedUsers: (users: { id: string; username: string }[]) => void
-  currentUser: { username: string } | null
-  setCurrentUser: (user: { username: string } | null) => void
+  currentUser: { username: string, id: string } | null
+  setCurrentUser: (user: { username: string, id: string } | null) => void
 }
 
 const ChannelContext = createContext<ChannelContextType | undefined>(undefined)
@@ -28,9 +29,9 @@ export const useChannel = () => {
 }
 
 export const ChannelProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentChat, setCurrentChat] = useState<ChatItem>({ id: "1", name: "general", type: "channel" })
+  const [currentChat, setCurrentChat] = useState<ChatItem>({ id: "1", name: "general", type: "channel", clerkId: null })
   const [connectedUsers, setConnectedUsers] = useState<{ id: string; username: string }[]>([])
-  const [currentUser, setCurrentUser] = useState<{ username: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ username: string, id: string } | null>(null)
 
   return (
     <ChannelContext.Provider value={{ 

@@ -3,8 +3,8 @@ import { NextRequest } from "next/server"
 import { db } from '@/db'
 import { messageContents, messages, directMessages, messageIds } from '@/db/schema'
 import { eq, lt, desc, and, or, gt, asc, sql } from 'drizzle-orm'
-import { generateUsername } from '@/utils/username'
 import { reactions } from '@/db/schema'
+import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
 
 interface CustomGlobal {
   io?: SocketIOServer
@@ -22,13 +22,23 @@ const MESSAGES_PER_PAGE = 50
 
 interface SocketUser {
   username: string
+  clerkId: string
+  email: string
 }
 
 const users = new Map<string, SocketUser>()
+const activeUsers = new Set<string>()
 
 export async function GET(req: NextRequest) {
+  const { userId, sessionId } = getAuth(req)
+  
+  if (!userId || !sessionId) {
+    return new Response("Unauthorized", { status: 401 })
+  }
+
   if (global.socketServer.io) {
     console.log("Socket is already running")
+    return  new Response(null, { status: 200 })
   } else {
     console.log("Socket is initializing")
     global.socketServer.io = new SocketIOServer(3001, {
@@ -37,15 +47,39 @@ export async function GET(req: NextRequest) {
       allowUpgrades: false
     })
 
-    global.socketServer.io.on("connection", (socket) => {
+    global.socketServer.io.on("connection", async (socket) => {
       console.log("Client connected")
-      
-      const username = generateUsername()
-      users.set(socket.id, { username })
-      socket.emit("user-assigned", { username })
 
-      const connectedUsers = Array.from(users.values())
-      global.socketServer.io?.emit("users-updated", connectedUsers)
+      socket.on("auth", async (data: { token: string }) => {
+        const payload = await verifyToken(data.token, {
+          secretKey: process.env.CLERK_SECRET_KEY
+        })
+
+        const client = await clerkClient()
+        const user = await client.users.getUser(payload.sub);
+
+
+        if (activeUsers.has(user.id)) {
+          socket.emit("auth-fail")
+          return
+        }
+
+        users.set(socket.id, {
+          username: user.username || user.emailAddresses[0].emailAddress,
+          clerkId: user.id,
+          email: user.emailAddresses[0].emailAddress
+        })
+        activeUsers.add(user.id)
+
+        socket.emit("auth-success")
+        socket.emit("user-assigned", { username: user.username, id: user.id })
+
+        const connectedUsers = Array.from(users.values()).map(user => ({
+          id: user.clerkId,
+          username: user.username
+        }))
+        global.socketServer.io?.emit("users-updated", connectedUsers)
+      })
       
       socket.on("join-chat", async (data: { chatId: string }) => {
         socket.join(`channel-${data.chatId}`)
@@ -84,14 +118,15 @@ export async function GET(req: NextRequest) {
         })
       })
 
-      socket.on("join-dm", async (data: { username: string }) => {
+      socket.on("join-dm", async (data: { id: string }) => {
         const currentUser = users.get(socket.id)
-        if (!currentUser || data.username === currentUser.username) return
+        if (!currentUser || data.id === currentUser.clerkId) return
         
-        const [participant1, participant2] = [currentUser.username, data.username].sort()
+        const [participant1, participant2] = [currentUser.clerkId, data.id].sort()
         
         const chatId = `dm-${participant1}-${participant2}`
         
+        console.log("Joining DM chatId:", chatId)
         socket.join(chatId)
         const chatMessages = await db.query.directMessages.findMany({
           where: and(
@@ -135,7 +170,7 @@ export async function GET(req: NextRequest) {
       })
 
       socket.on("leave-dm", (data: { username: string }) => {
-        socket.leave(`dm-${[data.username, users.get(socket.id)?.username].sort().join('-')}`)
+        socket.leave(`dm-${[data.username, users.get(socket.id)?.clerkId].sort().join('-')}`)
       })
 
       socket.on("send-dm", async (message: { 
@@ -143,10 +178,11 @@ export async function GET(req: NextRequest) {
         content: string,
         parentId?: number
       }) => {
+        console.log("Sending DM:", message)
         const user = users.get(socket.id)
         if (!user) return
 
-        const [participant1, participant2] = [user.username, message.username].sort()
+        const [participant1, participant2] = [user.clerkId, message.username].sort()
 
         // If there's a parentId, verify it belongs to this DM conversation
         if (message.parentId) {
@@ -190,7 +226,9 @@ export async function GET(req: NextRequest) {
           })
           .returning()
 
-        const chatId = `dm-${[user.username, message.username].sort().join('-')}`
+        const chatId = `dm-${[user.clerkId, message.username].sort().join('-')}`
+
+        console.log("New DM chatId:", chatId)
 
         if (message.parentId) {
           global.socketServer.io?.to(`${chatId}-thread-${message.parentId}`).emit("new-thread-message", {
@@ -372,8 +410,8 @@ export async function GET(req: NextRequest) {
         const user = users.get(socket.id)
         if (!user) return
 
-        const chatId = `dm-${[user.username, data.username].sort().join('-')}`
-        const [participant1, participant2] = [user.username, data.username].sort()
+        const chatId = `dm-${[user.clerkId, data.username].sort().join('-')}`
+        const [participant1, participant2] = [user.clerkId, data.username].sort()
         const threadId = `${chatId}-thread-${data.messageId}`
         socket.join(threadId)
 
@@ -419,13 +457,22 @@ export async function GET(req: NextRequest) {
       })
 
       socket.on("leave-dm-thread", (data: { messageId: number, username: string }) => {
-        socket.leave(`dm-${[data.username, users.get(socket.id)?.username].sort().join('-')}-thread-${data.messageId}`)
+        socket.leave(`dm-${[data.username, users.get(socket.id)?.clerkId].sort().join('-')}-thread-${data.messageId}`)
       })  
 
       socket.on("disconnect", () => {
+        console.log("Client disconnected")
+        const user = users.get(socket.id);
+        if (user) {
+          activeUsers.delete(user.clerkId)
+        }
+        
         users.delete(socket.id)
 
-        const connectedUsers = Array.from(users.values())
+        const connectedUsers = Array.from(users.values()).map(user => ({
+          id: user.clerkId,
+          username: user.username
+        }))
         global.socketServer.io?.emit("users-updated", connectedUsers)
       })
 
@@ -448,8 +495,8 @@ export async function GET(req: NextRequest) {
             where: and(
               eq(directMessages.id, data.messageId),
               or(
-                eq(directMessages.participant1, user.username),
-                eq(directMessages.participant2, user.username)
+                eq(directMessages.participant1, user.clerkId),
+                eq(directMessages.participant2, user.clerkId)
               )
             ),
             columns: { contentId: true, parentId: true, participant1: true, participant2: true }
@@ -460,7 +507,7 @@ export async function GET(req: NextRequest) {
           const existingReaction = await db.delete(reactions)
           .where(and(
             eq(reactions.messageId, messageRecord.contentId),
-            eq(reactions.username, user.username),
+            eq(reactions.username, user.clerkId),
             eq(reactions.emoji, data.emoji)
           ))
           .returning()
@@ -468,7 +515,7 @@ export async function GET(req: NextRequest) {
           if (existingReaction.length === 0) {
             await db.insert(reactions).values({
               messageId: messageRecord.contentId,
-              username: user.username,
+              username: user.clerkId,
               emoji: data.emoji
             })
           }
@@ -481,7 +528,7 @@ export async function GET(req: NextRequest) {
           .from(reactions)
           .where(eq(reactions.messageId, messageRecord.contentId))
           
-          const chatId = messageRecord.participant1 === user.username ? messageRecord.participant2 : messageRecord.participant1
+          const chatId = messageRecord.participant1 === user.clerkId ? messageRecord.participant2 : messageRecord.participant1
 
           const room = messageRecord.parentId
             ? `dm-${messageRecord.participant1}-${messageRecord.participant2}-thread-${messageRecord.parentId}`
@@ -503,7 +550,7 @@ export async function GET(req: NextRequest) {
           const existingReaction = await db.delete(reactions)
           .where(and(
             eq(reactions.messageId, messageRecord.contentId),
-            eq(reactions.username, user.username),
+            eq(reactions.username, user.clerkId),
             eq(reactions.emoji, data.emoji)
           ))
           .returning()
@@ -511,7 +558,7 @@ export async function GET(req: NextRequest) {
           if (existingReaction.length === 0) {
             await db.insert(reactions).values({
               messageId: messageRecord.contentId,
-              username: user.username,
+              username: user.clerkId,
               emoji: data.emoji
             })
           }
