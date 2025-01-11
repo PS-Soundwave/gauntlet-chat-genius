@@ -1,4 +1,4 @@
-import { db } from '../src/db'
+/*import { db } from '../src/db'
 import { messages } from '../src/db/schema'
 
 const MESSAGES_PER_CHANNEL = 1000
@@ -42,4 +42,4 @@ async function seed() {
 seed().catch((error) => {
   console.error('❌ Seeding failed:', error)
   process.exit(1)
-}) 
+})*/

@@ -1,4 +1,4 @@
-import { eq, asc } from "drizzle-orm";
+/*import { eq, asc } from "drizzle-orm";
 import { messages } from "../src/db/schema";
 import { db } from "@/db";
 
@@ -20,4 +20,4 @@ console.log(db.query.messages.findMany({
       }
     },
     orderBy: asc(messages.createdAt)
-  }).toSQL());
+  }).toSQL());*/

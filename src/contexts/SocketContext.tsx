@@ -35,7 +35,7 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         await fetch("/api/socket")
         if (!componentIsMounted) return
 
-        const newSocket = io("http://localhost:3001", {
+        const newSocket = io("http://:3001", {
             transports: ['websocket'],
             upgrade: false
         })
