@@ -62,7 +62,7 @@ export function Message({
     return () => {
       socket.off("reaction-updated", listener)
     }
-  }, [socket])
+  }, [socket, messageId])
 
   const handleReaction = (emoji: string) => {
     if (!socket) return

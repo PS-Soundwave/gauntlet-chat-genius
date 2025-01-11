@@ -15,7 +15,7 @@ export const messageContents = pgTable('message_contents', {
   username: text('username').notNull(),
 })
 
-export const messageContentsRelations = relations(messageContents, ({ one, many }) => ({
+export const messageContentsRelations = relations(messageContents, ({ many }) => ({
   reactions: many(reactions)
 }))
 

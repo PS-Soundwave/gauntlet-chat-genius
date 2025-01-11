@@ -1,13 +1,12 @@
 "use client"
 
-import { useState, useEffect, useCallback, useRef, useLayoutEffect } from "react"
+import { useState, useEffect } from "react"
 import { colors } from "@/utils/colors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useChannel } from "@/contexts/ChannelContext"
 import { useSocket } from "@/contexts/SocketContext"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useInView } from 'react-intersection-observer'
 import { MessageThread } from "./MessageThread"
 import { Message } from "@/components/Message"
 
@@ -25,23 +24,14 @@ type Message = {
 }
 
 export default function ChatInterface() {
-  const scrollViewportRef = useRef<HTMLDivElement>(null)
   const { currentChat, setConnectedUsers, setCurrentUser } = useChannel()
   const { socket, isConnected } = useSocket()
   const [messages, setMessages] = useState<{ [chatId: string]: Message[] }>({})
-  const [hasMore, setHasMore] = useState<{ [chatId: string]: boolean }>({})
-  const [isLoading, setIsLoading] = useState(false)
   const [inputMessage, setInputMessage] = useState("")
-  const [resetIsLoading, setResetIsLoading] = useState(false)
-  const [scrollAnchor, setScrollAnchor] = useState<{
-    messageId: number | null;
-    top: number | null;
-  } | null>(null);
-  const [username, setUsername] = useState<string>("")
   const [activeThread, setActiveThread] = useState<Message | null>(null)
   const [activeEmojiPicker, setActiveEmojiPicker] = useState<number | null>(null)
 
-  const { ref: topLoader, inView: isTopVisible } = useInView({
+  /*const { ref: topLoader, inView: isTopVisible } = useInView({
     threshold: 0,
     rootMargin: '-100px 0px 0px 0px',
   })
@@ -83,7 +73,7 @@ export default function ChatInterface() {
         }
       })
     }
-  }, [currentChat.id, messages, hasMore, isLoading])
+  }, [currentChat.id, messages, isLoading])*/
 
   useEffect(() => {
     if (!socket) return
@@ -298,10 +288,7 @@ export default function ChatInterface() {
       </div>
       <ScrollArea 
         className={`${colors.secondary} flex-grow p-4`}
-        viewportRef={scrollViewportRef}
-      >
-        <div ref={topLoader} className="h-16" />
-        
+      >    
         {messages[currentChat.id]?.filter(message => message.parentId === null).map((message) => (
           <div key={message.id}>
             <Message
@@ -328,8 +315,6 @@ export default function ChatInterface() {
             )}
           </div>
         ))}
-
-        <div ref={bottomLoader} className="h-16" />
       </ScrollArea>
       
       <form onSubmit={handleSendMessage} className="flex p-4 bg-gray-300">

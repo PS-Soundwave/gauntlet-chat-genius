@@ -4,7 +4,7 @@ import * as schema from './schema'
 
 // Load dotenv only if we're not in Next.js environment
 if (process.env.NODE_ENV !== 'production' && !process.env.NEXT_RUNTIME) {
-  require('dotenv').config()
+  import('dotenv').then((dotenv) => dotenv.config())
 }
 
 const databaseUrl = process.env.DATABASE_URL

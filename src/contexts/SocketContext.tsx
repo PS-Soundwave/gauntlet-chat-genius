@@ -1,8 +1,6 @@
-"use client"
-
 import { useAuth } from '@clerk/nextjs'
-import { redirect, useRouter } from 'next/navigation'
-import { createContext, useContext, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { io, Socket } from 'socket.io-client'
 
 type SocketContextType = {
@@ -23,60 +21,57 @@ export function useSocket() {
 export function SocketProvider({ children }: { children: React.ReactNode }) {
   const [isConnected, setIsConnected] = useState(false)
   const { getToken } = useAuth()
-  const [socket, setSocket] = useState<Socket | null>(null)
+  const socketRef = useRef<Socket | null>(null)
   const router = useRouter()
 
   useEffect(() => {
     // *internal screaming*
-    let componentIsMounted = true
-    let componentDidMount = false
+    let socketInitialized = false
+    let shouldSocketInitialize = true
 
     const initSocket = async () => {
         await fetch("/api/socket")
-        if (!componentIsMounted) return
+        if (!shouldSocketInitialize) return
 
-        const newSocket = io("http://:3001", {
+        socketRef.current = io("http://:3001", {
             transports: ['websocket'],
             upgrade: false
         })
 
-        newSocket.on("connect", async () => {
-            console.log("Socket connected:", newSocket.id)
-            newSocket.emit("auth", {
+        socketRef.current.on("connect", async () => {
+            socketRef.current?.emit("auth", {
                 token: await getToken()
             })
         })
 
-        newSocket.on("auth-success", () => {
+        socketRef.current.on("auth-success", () => {
             setIsConnected(true)
         })
 
-        newSocket.on("auth-fail", () => {
+        socketRef.current.on("auth-fail", () => {
             router.push("/duplicate-session")
         })
 
-        newSocket.on("disconnect", () => {
-            console.log("Socket disconnected:", newSocket.id)
+        socketRef.current.on("disconnect", () => {
             setIsConnected(false)
         })
 
-        setSocket(newSocket)
-        componentDidMount = true
+        socketInitialized = true
     }
 
     console.log("Socket effect running")
     initSocket()
 
     return () => {
-      componentIsMounted = false
-      if (!componentDidMount) return
-      console.log("Cleanup running, disconnecting socket:", socket)
-      socket?.disconnect()
+      shouldSocketInitialize = false
+      if (!socketInitialized) return
+      socketRef.current?.disconnect()
+      socketRef.current = null
     }
-  }, [])
+  }, [getToken, router])
 
   return (
-    <SocketContext.Provider value={{ socket: socket, isConnected }}>
+    <SocketContext.Provider value={{ socket: socketRef.current, isConnected }}>
       {children}
     </SocketContext.Provider>
   )

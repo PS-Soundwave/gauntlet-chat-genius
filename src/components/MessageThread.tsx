@@ -61,7 +61,7 @@ export function MessageThread({ parentMessage, onClose, chatId, channelType, act
             }
         }
     }
-  }, [socket, parentMessage.id])
+  }, [socket, parentMessage.id, channelType, chatId])
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()

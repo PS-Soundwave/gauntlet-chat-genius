@@ -2,7 +2,7 @@ import { Server as SocketIOServer } from "socket.io"
 import { NextRequest } from "next/server"
 import { db } from '@/db'
 import { messageContents, messages, directMessages, messageIds } from '@/db/schema'
-import { eq, lt, desc, and, or, gt, asc, sql } from 'drizzle-orm'
+import { eq, and, or, asc } from 'drizzle-orm'
 import { reactions } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
 
@@ -10,15 +10,7 @@ interface CustomGlobal {
   io?: SocketIOServer
 }
 
-declare global {
-  var socketServer: CustomGlobal
-}
-
-if (!global.socketServer) {
-  global.socketServer = {}
-}
-
-const MESSAGES_PER_PAGE = 50
+const socketServer: CustomGlobal = {}
 
 interface SocketUser {
   username: string
@@ -36,18 +28,18 @@ export async function GET(req: NextRequest) {
     return new Response("Unauthorized", { status: 401 })
   }
 
-  if (global.socketServer.io) {
+  if (socketServer.io) {
     console.log("Socket is already running")
     return  new Response(null, { status: 200 })
   } else {
     console.log("Socket is initializing")
-    global.socketServer.io = new SocketIOServer(3001, {
+    socketServer.io = new SocketIOServer(3001, {
       cors: { origin: "*" },
       transports: ['websocket'],
       allowUpgrades: false
     })
 
-    global.socketServer.io.on("connection", async (socket) => {
+    socketServer.io.on("connection", async (socket) => {
       console.log("Client connected")
 
       socket.on("auth", async (data: { token: string }) => {
@@ -78,7 +70,7 @@ export async function GET(req: NextRequest) {
           id: user.clerkId,
           username: user.username
         }))
-        global.socketServer.io?.emit("users-updated", connectedUsers)
+        socketServer.io?.emit("users-updated", connectedUsers)
       })
       
       socket.on("join-chat", async (data: { chatId: string }) => {
@@ -231,13 +223,13 @@ export async function GET(req: NextRequest) {
         console.log("New DM chatId:", chatId)
 
         if (message.parentId) {
-          global.socketServer.io?.to(`${chatId}-thread-${message.parentId}`).emit("new-thread-message", {
+          socketServer.io?.to(`${chatId}-thread-${message.parentId}`).emit("new-thread-message", {
             ...newMessageContent,
             ...newMessage,
             chatId
           })
         } else {
-          global.socketServer.io?.to(chatId).emit("new-message", {
+          socketServer.io?.to(chatId).emit("new-message", {
             ...newMessageContent,
             ...newMessage,
             chatId
@@ -292,13 +284,13 @@ export async function GET(req: NextRequest) {
           .returning()
 
         if (message.parentId) {
-          global.socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
+          socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
             ...newMessageContent,
             ...newMessage,
             chatId: message.chatId
           })
         } else {
-          global.socketServer.io?.emit("new-message", {
+          socketServer.io?.emit("new-message", {
             ...newMessageContent,
             ...newMessage,
             chatId: message.chatId
@@ -473,7 +465,7 @@ export async function GET(req: NextRequest) {
           id: user.clerkId,
           username: user.username
         }))
-        global.socketServer.io?.emit("users-updated", connectedUsers)
+        socketServer.io?.emit("users-updated", connectedUsers)
       })
 
       socket.on("react-to-message", async (data: { 
@@ -534,7 +526,7 @@ export async function GET(req: NextRequest) {
             ? `dm-${messageRecord.participant1}-${messageRecord.participant2}-thread-${messageRecord.parentId}`
             : `dm-${messageRecord.participant1}-${messageRecord.participant2}`
           
-          global.socketServer.io?.to(room).emit("reaction-updated", {
+          socketServer.io?.to(room).emit("reaction-updated", {
             messageId: data.messageId,
             reactions: allReactions,
             chatId: chatId
@@ -573,11 +565,11 @@ export async function GET(req: NextRequest) {
           .from(reactions)
           .where(eq(reactions.messageId, messageRecord.contentId))
 
-          let room = messageRecord.parentId
+          const room = messageRecord.parentId
             ? `thread-${messageRecord.parentId}`
             : `channel-${messageRecord.chatId}`
 
-          global.socketServer.io?.to(room).emit("reaction-updated", {
+          socketServer.io?.to(room).emit("reaction-updated", {
             messageId: data.messageId,
             reactions: allReactions,
             chatId: chatId

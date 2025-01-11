@@ -5,20 +5,11 @@ import * as ScrollAreaPrimitive from "@radix-ui/react-scroll-area"
 
 import { cn } from "@/lib/utils"
 
-interface ScrollAreaProps extends React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> {
-  onScrollNearTop?: () => void
-  onScrollNearBottom?: () => void
-  threshold?: number
-  viewportRef?: React.RefObject<HTMLDivElement>
-}
-
 const ScrollArea = React.forwardRef<
   React.ComponentRef<typeof ScrollAreaPrimitive.Root>,
-  ScrollAreaProps
->(({ className, onScrollNearTop, onScrollNearBottom, threshold = 0.2, viewportRef, children, ...props }, ref) => {
-  const lastScrollTop = React.useRef(0)
-
-  const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
+  React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root>
+>(({ className, children, ...props }, ref) => {
+  /*const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
     const target = event.target as HTMLDivElement
     const scrollPercentage = target.scrollTop / (target.scrollHeight - target.clientHeight)
     const scrollingUp = target.scrollTop < lastScrollTop.current
@@ -33,7 +24,7 @@ const ScrollArea = React.forwardRef<
     }
 
     lastScrollTop.current = target.scrollTop
-  }
+  }*/
 
   return (
     <ScrollAreaPrimitive.Root
