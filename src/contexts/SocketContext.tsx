@@ -32,10 +32,10 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
     const initSocket = async () => {
         await fetch("/api/socket")
         if (!shouldSocketInitialize) return
-
-        socketRef.current = io("http://:3001", {
+        
+        socketRef.current = io(process.env.NEXT_PUBLIC_WEBSOCKET_ORIGIN, {
             transports: ['websocket'],
-            upgrade: false
+            path: "/ws/"
         })
 
         socketRef.current.on("connect", async () => {

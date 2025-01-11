@@ -34,9 +34,11 @@ export async function GET(req: NextRequest) {
   } else {
     console.log("Socket is initializing")
     socketServer.io = new SocketIOServer(3001, {
-      cors: { origin: "*" },
+      cors: {
+        origin: "http://localhost:3001",
+      },
       transports: ['websocket'],
-      allowUpgrades: false
+      path: "/ws/"
     })
 
     socketServer.io.on("connection", async (socket) => {
