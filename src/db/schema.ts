@@ -19,22 +19,42 @@ export const messageContentsRelations = relations(messageContents, ({ many }) =>
   reactions: many(reactions)
 }))
 
+export const channels = pgTable('channels', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull()
+})
+
 export const messages = pgTable('messages', {
-  id: integer('id')
-    .primaryKey(),
+  id: integer('id').primaryKey(),
   type: messageTypeEnum().notNull(),
   contentId: integer('content_id')
     .notNull()
     .references(() => messageContents.id),
-  chatId: text('chat_id').notNull(),
+  channelId: integer('channel_id')
+    .notNull()
+    .references(() => channels.id),
   parentId: integer('parent_id').references((): PgColumn => messages.id),
   createdAt: timestamp('created_at').defaultNow()
-}, (table) => [check("type", sql`type = 'message'`), foreignKey({ columns: [table.id, table.type], foreignColumns: [messageIds.id, messageIds.type] })])
+}, (table) => [
+  check("type", sql`type = 'message'`),
+  foreignKey({
+    columns: [table.id, table.type],
+    foreignColumns: [messageIds.id, messageIds.type]
+  })
+])
+
+export const channelsRelations = relations(channels, ({ many }) => ({
+  messages: many(messages)
+}))
 
 export const messagesRelations = relations(messages, ({ one, many }) => ({
   messageContent: one(messageContents, {
     fields: [messages.contentId],
     references: [messageContents.id]
+  }),
+  channel: one(channels, {
+    fields: [messages.channelId],
+    references: [channels.id]
   }),
   parentMessage: one(messages, {
     fields: [messages.parentId],

@@ -3,14 +3,17 @@
 import React, { createContext, useState, useContext } from "react"
 
 type ChatItem = {
-  id: string
   name: string
-  clerkId: string | null
-  type: "channel" | "dm"
+  clerkId: string
+  type: "dm"
+} | {
+  type: "channel"
+  id: number
+  name: string
 }
 
 type ChannelContextType = {
-  currentChat: ChatItem
+  currentChat: ChatItem | null
   setCurrentChat: (chat: ChatItem) => void
   connectedUsers: { id: string; username: string }[]
   setConnectedUsers: (users: { id: string; username: string }[]) => void
@@ -29,7 +32,7 @@ export const useChannel = () => {
 }
 
 export const ChannelProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentChat, setCurrentChat] = useState<ChatItem>({ id: "1", name: "general", type: "channel", clerkId: null })
+  const [currentChat, setCurrentChat] = useState<ChatItem | null>(null)
   const [connectedUsers, setConnectedUsers] = useState<{ id: string; username: string }[]>([])
   const [currentUser, setCurrentUser] = useState<{ username: string, id: string } | null>(null)
 

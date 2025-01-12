@@ -47,7 +47,6 @@ export function Message({
 
     const listener = (data: {
         messageId: number
-        chatId: string
         reactions: {
           emoji: string
           username: string

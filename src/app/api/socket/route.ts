@@ -75,11 +75,11 @@ export async function GET(req: NextRequest) {
         socketServer.io?.emit("users-updated", connectedUsers)
       })
       
-      socket.on("join-chat", async (data: { chatId: string }) => {
-        socket.join(`channel-${data.chatId}`)
+      socket.on("join-chat", async (data: { channelId: number }) => {
+        socket.join(`channel-${data.channelId}`)
 
         const chatMessages = await db.query.messages.findMany({
-          where: eq(messages.chatId, `${data.chatId}`),
+          where: eq(messages.channelId, data.channelId),
           with: {
             messageContent: {
               columns: {
@@ -107,7 +107,7 @@ export async function GET(req: NextRequest) {
         })))
       
         socket.emit("chat-history", {
-          chatId: data.chatId,
+          channelId: data.channelId,
           messages: chatMessages
         })
       })
@@ -240,7 +240,7 @@ export async function GET(req: NextRequest) {
       })
 
       socket.on("send-message", async (message: { 
-        chatId: string, 
+        channelId: number, 
         content: string,
         parentId?: number
       }) => {
@@ -252,11 +252,11 @@ export async function GET(req: NextRequest) {
           const parentMessage = await db.query.messages.findFirst({
             where: eq(messages.id, message.parentId),
             columns: {
-              chatId: true
+              channelId: true
             }
           })
 
-          if (!parentMessage || parentMessage.chatId !== `${message.chatId}`) {
+          if (!parentMessage || parentMessage.channelId !== message.channelId) {
             return // Parent message doesn't exist or belongs to different channel
           }
         }
@@ -280,7 +280,7 @@ export async function GET(req: NextRequest) {
             id: newMessageId.id,
             type: 'message',
             contentId: newMessageContent.id,
-            chatId: `${message.chatId}`,
+            channelId: message.channelId,
             parentId: message.parentId || null
           })
           .returning()
@@ -288,14 +288,13 @@ export async function GET(req: NextRequest) {
         if (message.parentId) {
           socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
             ...newMessageContent,
-            ...newMessage,
-            chatId: message.chatId
+            ...newMessage
           })
         } else {
-          socketServer.io?.emit("new-message", {
+          socketServer.io?.to(`channel-${message.channelId}`).emit("new-message", {
             ...newMessageContent,
             ...newMessage,
-            chatId: message.chatId
+            channelId: message.channelId
           })
         }
       })
@@ -360,13 +359,13 @@ export async function GET(req: NextRequest) {
         })
       })*/
 
-      socket.on("join-thread", async (data: { messageId: number, chatId: string }) => {
+      socket.on("join-thread", async (data: { messageId: number, channelId: number }) => {
         const threadId = `thread-${data.messageId}`
         socket.join(threadId)
 
         const threadMessages = await db.query.messages.findMany({
           where: and(
-            eq(messages.chatId, `${data.chatId}`),
+            eq(messages.channelId, data.channelId),
             eq(messages.parentId, data.messageId)
           ),
           with: {
@@ -522,8 +521,6 @@ export async function GET(req: NextRequest) {
           .from(reactions)
           .where(eq(reactions.messageId, messageRecord.contentId))
           
-          const chatId = messageRecord.participant1 === user.clerkId ? messageRecord.participant2 : messageRecord.participant1
-
           const room = messageRecord.parentId
             ? `dm-${messageRecord.participant1}-${messageRecord.participant2}-thread-${messageRecord.parentId}`
             : `dm-${messageRecord.participant1}-${messageRecord.participant2}`
@@ -531,12 +528,11 @@ export async function GET(req: NextRequest) {
           socketServer.io?.to(room).emit("reaction-updated", {
             messageId: data.messageId,
             reactions: allReactions,
-            chatId: chatId
           })
         } else {
           const messageRecord = await db.query.messages.findFirst({
             where: eq(messages.id, data.messageId),
-            columns: { contentId: true, parentId: true, chatId: true }
+            columns: { contentId: true, parentId: true, channelId: true }
           })
 
           if (!messageRecord) return
@@ -557,8 +553,6 @@ export async function GET(req: NextRequest) {
             })
           }
 
-          const chatId = messageRecord.chatId
-
           const allReactions = await db
           .select({
             emoji: reactions.emoji,
@@ -569,14 +563,25 @@ export async function GET(req: NextRequest) {
 
           const room = messageRecord.parentId
             ? `thread-${messageRecord.parentId}`
-            : `channel-${messageRecord.chatId}`
+            : `channel-${messageRecord.channelId}`
 
           socketServer.io?.to(room).emit("reaction-updated", {
             messageId: data.messageId,
-            reactions: allReactions,
-            chatId: chatId
+            reactions: allReactions
           })
         }
+      })
+
+      socket.on("get-channels", async () => {
+        const allChannels = await db.query.channels.findMany({
+          columns: {
+            id: true,
+            name: true
+          },
+          orderBy: (channels, { asc }) => [asc(channels.name)]
+        })
+
+        socket.emit("channels", allChannels)
       })
     })
   }

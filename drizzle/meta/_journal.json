@@ -52,31 +52,17 @@
       "breakpoints": true
     },
     {
-      "idx": 7,
-      "version": "7",
-      "when": 1736473153064,
-      "tag": "0007_superb_chat",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "7",
-      "when": 1736473343013,
-      "tag": "0008_illegal_hercules",
-      "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1736473518686,
-      "tag": "0009_tranquil_blob",
-      "breakpoints": true
-    },
-    {
       "idx": 10,
       "version": "7",
       "when": 1736473553002,
       "tag": "0010_nervous_roland_deschain",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1736649317132,
+      "tag": "0011_far_outlaw_kid",
       "breakpoints": true
     }
   ]

@@ -16,7 +16,7 @@ type Message = {
   createdAt: Date
   username: string
   parentId: number | null
-  chatId: string
+  channelId: number
   reactions?: {
     emoji: string
     username: string
@@ -121,12 +121,12 @@ export default function ChatInterface() {
     });*/
 
     socket.on("chat-history", (data: { 
-      chatId: string, 
+      channelId: number, 
       messages: Message[]
     }) => {
       setMessages(prev => ({
         ...prev,
-        [data.chatId]: data.messages
+        [data.channelId]: data.messages
       }));
     });
 
@@ -170,7 +170,7 @@ export default function ChatInterface() {
     socket.on("new-message", (message: Message) => {
       setMessages(prevMessages => ({
         ...prevMessages,
-        [message.chatId]: [...(prevMessages[message.chatId] || []), message]
+        [message.channelId]: [...(prevMessages[message.channelId] || []), message]
       }))
     })
 
@@ -188,7 +188,7 @@ export default function ChatInterface() {
   }, [socket, setConnectedUsers, setCurrentUser])
 
   useEffect(() => {
-    if (socket && isConnected) {
+    if (socket && isConnected && currentChat) {
       if (currentChat.type === "dm") {
         socket.emit("join-dm", {
           id: currentChat.clerkId
@@ -196,12 +196,12 @@ export default function ChatInterface() {
 
         return () => {
           socket.emit("leave-dm", {
-            username: currentChat.id
+            username: currentChat.clerkId
           })
         }
       } else {
         socket.emit("join-chat", {
-          chatId: currentChat.id
+          channelId: currentChat.id
         })
 
         return () => {
@@ -254,20 +254,7 @@ export default function ChatInterface() {
     }
   }, [messages, scrollAnchor])*/
 
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (inputMessage.trim() && socket && isConnected) {
-      if (currentChat.type === "dm") {
-        socket.emit("send-dm", {
-          username: currentChat.clerkId,
-          content: inputMessage
-        })
-      } else {
-        socket.emit("send-message", { chatId: currentChat.id, content: inputMessage })
-      }
-      setInputMessage("")
-    }
-  }
+  
 
   useEffect(() => {
     const handleClickOutside = () => {
@@ -281,6 +268,23 @@ export default function ChatInterface() {
     }
   }, [])
 
+  if (!currentChat) return null
+
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (inputMessage.trim() && socket && isConnected) {
+      if (currentChat.type === "dm") {
+        socket.emit("send-dm", {
+          username: currentChat.clerkId,
+          content: inputMessage
+        })
+      } else {
+        socket.emit("send-message", { channelId: currentChat.id, content: inputMessage })
+      }
+      setInputMessage("")
+    }
+  }
+  
   return (
     <div className="flex flex-col h-screen">
       <div className={`${colors.primary} p-4 text-white font-semibold`}>
@@ -289,7 +293,7 @@ export default function ChatInterface() {
       <ScrollArea 
         className={`${colors.secondary} flex-grow p-4`}
       >    
-        {messages[currentChat.id]?.filter(message => message.parentId === null).map((message) => (
+        {messages[currentChat.type === "dm" ? currentChat.clerkId : currentChat.id]?.filter(message => message.parentId === null).map((message) => (
           <div key={message.id}>
             <Message
               username={message.username}
@@ -306,8 +310,13 @@ export default function ChatInterface() {
                 <MessageThread
                   parentMessage={activeThread}
                   onClose={() => setActiveThread(null)}
-                  chatId={currentChat.type === "dm" ? currentChat.clerkId ?? "" : currentChat.id}
-                  channelType={currentChat.type}
+                  channel={currentChat.type === "dm" ? {
+                    id: currentChat.clerkId,
+                    type: "dm"
+                  } : {
+                    id: currentChat.id,
+                    type: "channel"
+                  }}
                   activeEmojiPicker={activeEmojiPicker}
                   setActiveEmojiPicker={setActiveEmojiPicker}
                 />

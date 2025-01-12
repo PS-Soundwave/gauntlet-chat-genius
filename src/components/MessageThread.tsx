@@ -7,38 +7,35 @@ import { Message } from "./Message"
 import { useSocket } from "@/contexts/SocketContext"
 
 type ThreadMessage = {
-    id: number
-    content: string
-    createdAt: Date
+  id: number
+  content: string
+  createdAt: Date
+  username: string
+  reactions?: {
+    emoji: string
     username: string
-    reactions?: {
-        emoji: string
-        username: string
-      }[]
+  }[]
 }
 
 type MessageThreadProps = {
   parentMessage: ThreadMessage
   onClose: () => void
-  chatId: string
-  channelType: ChannelType
+  channel: { type: "dm", id: string } | { type: "channel", id: number }
   activeEmojiPicker: number | null
   setActiveEmojiPicker: (messageId: number | null) => void
 }
 
-type ChannelType = "dm" | "channel"
-
-export function MessageThread({ parentMessage, onClose, chatId, channelType, activeEmojiPicker, setActiveEmojiPicker }: MessageThreadProps) {
+export function MessageThread({ parentMessage, onClose, channel, activeEmojiPicker, setActiveEmojiPicker }: MessageThreadProps) {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const { socket } = useSocket()
   
   useEffect(() => {
     if (socket) {
-        if (channelType === "dm") {
-            socket.emit("join-dm-thread", { messageId: parentMessage.id, username: chatId })
+        if (channel.type === "dm") {
+            socket.emit("join-dm-thread", { messageId: parentMessage.id, username: channel.id })
         } else {
-            socket.emit("join-thread", { messageId: parentMessage.id, chatId })
+            socket.emit("join-thread", { messageId: parentMessage.id, channelId: channel.id })
         }
 
         socket.on("thread-history", (data: { messageId: number, messages: ThreadMessage[] }) => {
@@ -51,8 +48,8 @@ export function MessageThread({ parentMessage, onClose, chatId, channelType, act
 
         return () => {
             if (socket) {
-                if (channelType === "dm") {
-                    socket.emit("leave-dm-thread", { messageId: parentMessage.id, username: chatId })
+                if (channel.type === "dm") {
+                    socket.emit("leave-dm-thread", { messageId: parentMessage.id, username: channel.id })
                 } else {
                     socket.emit("leave-thread", parentMessage.id)
                 }
@@ -61,20 +58,20 @@ export function MessageThread({ parentMessage, onClose, chatId, channelType, act
             }
         }
     }
-  }, [socket, parentMessage.id, channelType, chatId])
+  }, [socket, parentMessage.id, channel])
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
     if (inputMessage.trim() && socket) {
-        if (channelType === "dm") {
+        if (channel.type === "dm") {
             socket.emit("send-dm", {
-                username: chatId,
+                username: channel.id,
                 content: inputMessage,
                 parentId: parentMessage.id
             })
         } else {
             socket.emit("send-message", {
-                chatId,
+                channelId: channel.id,
                 content: inputMessage,
                 parentId: parentMessage.id
             })
