@@ -178,6 +178,8 @@ export default function ChatInterface() {
       setCurrentUser({ username: data.username, id: data.id })
     })
 
+    socket.emit("get-user")
+
     return () => {
       socket.off("users-updated")
       socket.off("chat-history")

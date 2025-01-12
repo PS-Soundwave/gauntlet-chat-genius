@@ -66,7 +66,6 @@ export async function GET(req: NextRequest) {
         activeUsers.add(user.id)
 
         socket.emit("auth-success")
-        socket.emit("user-assigned", { username: user.username, id: user.id })
 
         const connectedUsers = Array.from(users.values()).map(user => ({
           id: user.clerkId,
@@ -75,6 +74,14 @@ export async function GET(req: NextRequest) {
         socketServer.io?.emit("users-updated", connectedUsers)
       })
       
+      socket.on("get-user", () => {
+        const user = users.get(socket.id);
+
+        if (!user) return
+
+        socket.emit("user-assigned", { username: user.username, id: user.clerkId })
+      });
+
       socket.on("join-chat", async (data: { channelId: number }) => {
         socket.join(`channel-${data.channelId}`)
 
