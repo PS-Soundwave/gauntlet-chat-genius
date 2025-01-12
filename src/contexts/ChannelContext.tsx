@@ -14,7 +14,7 @@ type ChatItem = {
 
 type ChannelContextType = {
   currentChat: ChatItem | null
-  setCurrentChat: (chat: ChatItem) => void
+  setCurrentChat: (chat: ChatItem | null) => void
   connectedUsers: { id: string; username: string }[]
   setConnectedUsers: (users: { id: string; username: string }[]) => void
   currentUser: { username: string, id: string } | null

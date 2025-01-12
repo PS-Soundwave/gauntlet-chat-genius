@@ -32,7 +32,7 @@ export const messages = pgTable('messages', {
     .references(() => messageContents.id),
   channelId: integer('channel_id')
     .notNull()
-    .references(() => channels.id),
+    .references(() => channels.id, { onDelete: 'cascade' }),
   parentId: integer('parent_id').references((): PgColumn => messages.id),
   createdAt: timestamp('created_at').defaultNow()
 }, (table) => [

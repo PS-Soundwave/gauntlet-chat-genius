@@ -5,6 +5,7 @@ import { colors } from "@/utils/colors"
 import { useChannel } from "@/contexts/ChannelContext"
 import { useSocket } from "@/contexts/SocketContext"
 import { useEffect, useState } from "react"
+import { Input } from "@/components/ui/input"
 
 type Channel = {
   id: number
@@ -15,12 +16,13 @@ export function Sidebar() {
   const { currentChat, setCurrentChat, connectedUsers, currentUser } = useChannel()
   const { socket } = useSocket()
   const [channels, setChannels] = useState<Channel[]>([])
+  const [isAddingChannel, setIsAddingChannel] = useState(false)
+  const [newChannelName, setNewChannelName] = useState("")
 
   useEffect(() => {
     if (!socket) return
 
     socket.on("channels", (serverChannels: Channel[]) => {
-      console.log("serverChannels", serverChannels)
       setChannels(serverChannels)
     })
 
@@ -30,6 +32,25 @@ export function Sidebar() {
       socket.off("channels")
     }
   }, [socket])
+
+  const handleAddChannel = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newChannelName.trim() && socket) {
+      socket.emit("add-channel", { name: newChannelName.trim() })
+      setNewChannelName("")
+      setIsAddingChannel(false)
+    }
+  }
+
+  const handleRemoveChannel = (channelId: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (socket) {
+      socket.emit("remove-channel", { channelId })
+      if (currentChat?.type === "channel" && currentChat.id === channelId) {
+        setCurrentChat(null)
+      }
+    }
+  }
 
   const dms = connectedUsers
     .filter(user => user.id !== currentUser?.id)
@@ -44,22 +65,58 @@ export function Sidebar() {
       <h2 className="text-xl font-semibold mb-4">ChatGenius</h2>
       <ScrollArea className="flex-grow">
         <div className="mb-4">
-          <h3 className="text-sm font-semibold mb-2">Channels</h3>
-          {channels.map((channel) => (
-            <Button
-              key={channel.id}
-              variant="ghost"
-              className={`w-full justify-start mb-1 ${
-                currentChat?.type === "channel" && currentChat.id === channel.id ? colors.activeChannel : ""
-              }`}
-              onClick={() => setCurrentChat({
-                id: channel.id,
-                name: channel.name,
-                type: "channel"
-              })}
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-sm font-semibold">Channels</h3>
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => setIsAddingChannel(true)}
+              className="h-6 w-6 p-0"
             >
-              # {channel.name}
+              +
             </Button>
+          </div>
+
+          {isAddingChannel && (
+            <form onSubmit={handleAddChannel} className="mb-2">
+              <div className="flex gap-2">
+                <Input
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                  placeholder="Channel name"
+                  className="h-8"
+                />
+                <Button type="submit" size="sm" className="h-8">
+                  Add
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {channels.map((channel) => (
+            <div key={channel.id} className="flex items-center group">
+              <Button
+                variant="ghost"
+                className={`w-full justify-start mb-1 ${
+                  currentChat?.type === "channel" && currentChat.id === channel.id ? colors.activeChannel : ""
+                }`}
+                onClick={() => setCurrentChat({
+                  id: channel.id,
+                  name: channel.name,
+                  type: "channel"
+                })}
+              >
+                # {channel.name}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={(e) => handleRemoveChannel(channel.id, e)}
+                className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                ×
+              </Button>
+            </div>
           ))}
         </div>
         <Separator className="my-2" />

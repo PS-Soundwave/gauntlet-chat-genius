@@ -1,7 +1,7 @@
 import { Server as SocketIOServer } from "socket.io"
 import { NextRequest } from "next/server"
 import { db } from '@/db'
-import { messageContents, messages, directMessages, messageIds } from '@/db/schema'
+import { messageContents, messages, directMessages, messageIds, channels } from '@/db/schema'
 import { eq, and, or, asc } from 'drizzle-orm'
 import { reactions } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
@@ -83,6 +83,9 @@ export async function GET(req: NextRequest) {
       });
 
       socket.on("join-chat", async (data: { channelId: number }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
         socket.join(`channel-${data.channelId}`)
 
         const chatMessages = await db.query.messages.findMany({
@@ -179,7 +182,6 @@ export async function GET(req: NextRequest) {
         content: string,
         parentId?: number
       }) => {
-        console.log("Sending DM:", message)
         const user = users.get(socket.id)
         if (!user) return
 
@@ -367,6 +369,9 @@ export async function GET(req: NextRequest) {
       })*/
 
       socket.on("join-thread", async (data: { messageId: number, channelId: number }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
         const threadId = `thread-${data.messageId}`
         socket.join(threadId)
 
@@ -580,6 +585,9 @@ export async function GET(req: NextRequest) {
       })
 
       socket.on("get-channels", async () => {
+        const user = users.get(socket.id)
+        if (!user) return
+
         const allChannels = await db.query.channels.findMany({
           columns: {
             id: true,
@@ -589,6 +597,49 @@ export async function GET(req: NextRequest) {
         })
 
         socket.emit("channels", allChannels)
+      })
+
+      socket.on("add-channel", async (data: { name: string }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
+        try {
+          await db.insert(channels)
+            .values({
+              name: data.name
+            })
+
+          const allChannels = await db.query.channels.findMany({
+            columns: {
+              id: true,
+              name: true
+            },
+            orderBy: (channels, { asc }) => [asc(channels.name)]
+          })
+
+          socketServer.io?.emit("channels", allChannels)
+        } catch {}
+      })
+
+      socket.on("remove-channel", async (data: { channelId: number }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
+        try {
+          await db.delete(channels)
+            .where(eq(channels.id, data.channelId));
+        } catch {}
+
+        const allChannels = await db.query.channels.findMany({
+          columns: {
+            id: true,
+            name: true
+          },
+          orderBy: (channels, { asc }) => [asc(channels.name)]
+        })
+
+        // Notify all clients about the removed channel
+        socketServer.io?.emit("channels", allChannels)
       })
     })
   }
