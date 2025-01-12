@@ -16,7 +16,8 @@ export const messageContents = pgTable('message_contents', {
 })
 
 export const messageContentsRelations = relations(messageContents, ({ many }) => ({
-  reactions: many(reactions)
+  reactions: many(reactions),
+  attachments: many(attachments)
 }))
 
 export const channels = pgTable('channels', {
@@ -108,5 +109,23 @@ export const directMessagesRelations = relations(directMessages, ({ one, many })
   id: one(messageIds, {
     fields: [directMessages.id],
     references: [messageIds.id]
+  })
+}))
+
+export const attachments = pgTable('attachments', {
+  id: serial('id').primaryKey(),
+  messageContentId: integer('message_content_id')
+    .notNull()
+    .references(() => messageContents.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  filename: text('filename').notNull(),
+  contentType: text('content_type').notNull(),
+  size: integer('size').notNull()
+})
+
+export const attachmentsRelations = relations(attachments, ({ one }) => ({
+  messageContent: one(messageContents, {
+    fields: [attachments.messageContentId],
+    references: [messageContents.id]
   })
 }))

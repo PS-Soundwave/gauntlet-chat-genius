@@ -52,13 +52,13 @@ export function Sidebar() {
     }
   }
 
-  const dms = connectedUsers
+  const dms = currentUser ? connectedUsers
     .filter(user => user.id !== currentUser?.id)
     .map(user => ({
       name: user.username,
       clerkId: user.id,
       type: "dm" as const
-    }))
+    })) : []
 
   return (
     <div className={`${colors.secondary} w-64 h-screen p-4 flex flex-col`}>

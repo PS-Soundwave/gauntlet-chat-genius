@@ -1,7 +1,7 @@
 import { Server as SocketIOServer } from "socket.io"
 import { NextRequest } from "next/server"
 import { db } from '@/db'
-import { messageContents, messages, directMessages, messageIds, channels } from '@/db/schema'
+import { messageContents, messages, directMessages, messageIds, channels, attachments } from '@/db/schema'
 import { eq, and, or, asc } from 'drizzle-orm'
 import { reactions } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
@@ -102,6 +102,14 @@ export async function GET(req: NextRequest) {
                     emoji: true,
                     username: true
                   }
+                },
+                attachments: {
+                  columns: {
+                    url: true,
+                    filename: true,
+                    contentType: true,
+                    size: true
+                  }
                 }
               }
             }
@@ -113,7 +121,13 @@ export async function GET(req: NextRequest) {
           username: msg.messageContent.username,
           createdAt: msg.createdAt,
           parentId: msg.parentId,
-          reactions: msg.messageContent.reactions
+          reactions: msg.messageContent.reactions,
+          attachments: msg.messageContent.attachments.map(attachment => ({
+            key: attachment.url,
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            size: attachment.size
+          }))
         })))
       
         socket.emit("chat-history", {
@@ -149,6 +163,14 @@ export async function GET(req: NextRequest) {
                     emoji: true,
                     username: true
                   }
+                },
+                attachments: {
+                  columns: {
+                    url: true,
+                    filename: true,
+                    contentType: true,
+                    size: true
+                  }
                 }
               }
             }
@@ -160,11 +182,17 @@ export async function GET(req: NextRequest) {
           username: msg.messageContent.username,
           createdAt: msg.createdAt,
           parentId: msg.parentId,
-          reactions: msg.messageContent.reactions
+          reactions: msg.messageContent.reactions,
+          attachments: msg.messageContent.attachments.map(attachment => ({
+            key: attachment.url,
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            size: attachment.size
+          }))
         })))
 
         socket.emit("chat-history", {
-          chatId,
+          channelId: chatId,
           messages: chatMessages
         })
       })
@@ -180,13 +208,19 @@ export async function GET(req: NextRequest) {
       socket.on("send-dm", async (message: { 
         username: string, 
         content: string,
-        parentId?: number
+        parentId?: number,
+        attachments?: Array<{
+          key: string,
+          filename: string,
+          contentType: string,
+          size: number
+        }>
       }) => {
         const user = users.get(socket.id)
         if (!user) return
 
         const [participant1, participant2] = [user.clerkId, message.username].sort()
-
+        console.log(message)
         // If there's a parentId, verify it belongs to this DM conversation
         if (message.parentId) {
           const parentMessage = await db.query.directMessages.findFirst({
@@ -217,6 +251,18 @@ export async function GET(req: NextRequest) {
           })
           .returning()
 
+        // Create attachments if any
+        if (message.attachments?.length) {
+          await db.insert(attachments)
+            .values(message.attachments.map(attachment => ({
+              messageContentId: newMessageContent.id,
+              url: attachment.key,
+              filename: attachment.filename,
+              contentType: attachment.contentType,
+              size: attachment.size
+            })))
+        }
+
         // Create direct message
         const [newMessage] = await db.insert(directMessages)
           .values({
@@ -237,13 +283,15 @@ export async function GET(req: NextRequest) {
           socketServer.io?.to(`${chatId}-thread-${message.parentId}`).emit("new-thread-message", {
             ...newMessageContent,
             ...newMessage,
-            chatId
+            channelId: chatId,
+            attachments: message.attachments
           })
         } else {
           socketServer.io?.to(chatId).emit("new-message", {
             ...newMessageContent,
             ...newMessage,
-            chatId
+            channelId: chatId,
+            attachments: message.attachments
           })
         }
       })
@@ -251,7 +299,13 @@ export async function GET(req: NextRequest) {
       socket.on("send-message", async (message: { 
         channelId: number, 
         content: string,
-        parentId?: number
+        parentId?: number,
+        attachments?: Array<{
+          key: string,
+          filename: string,
+          contentType: string,
+          size: number
+        }>
       }) => {
         const user = users.get(socket.id)
         if (!user) return
@@ -283,6 +337,18 @@ export async function GET(req: NextRequest) {
           })
           .returning()
 
+        // Create attachments if any
+        if (message.attachments?.length) {
+          await db.insert(attachments)
+            .values(message.attachments.map(attachment => ({
+              messageContentId: newMessageContent.id,
+              url: attachment.key,
+              filename: attachment.filename,
+              contentType: attachment.contentType,
+              size: attachment.size
+            })))
+        }
+
         // Create channel message
         const [newMessage] = await db.insert(messages)
           .values({
@@ -297,13 +363,15 @@ export async function GET(req: NextRequest) {
         if (message.parentId) {
           socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
             ...newMessageContent,
-            ...newMessage
+            ...newMessage,
+            attachments: message.attachments
           })
         } else {
           socketServer.io?.to(`channel-${message.channelId}`).emit("new-message", {
             ...newMessageContent,
             ...newMessage,
-            channelId: message.channelId
+            channelId: message.channelId,
+            attachments: message.attachments
           })
         }
       })
@@ -392,6 +460,14 @@ export async function GET(req: NextRequest) {
                     emoji: true,
                     username: true
                   }
+                },
+                attachments: {
+                  columns: {
+                    url: true,
+                    filename: true,
+                    contentType: true,
+                    size: true
+                  }
                 }
               }
             }
@@ -402,7 +478,13 @@ export async function GET(req: NextRequest) {
           content: msg.messageContent.content,
           username: msg.messageContent.username,
           createdAt: msg.createdAt,
-          reactions: msg.messageContent.reactions
+          reactions: msg.messageContent.reactions,
+          attachments: msg.messageContent.attachments.map(attachment => ({
+            key: attachment.url,
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            size: attachment.size
+          }))
         })))
 
         socket.emit("thread-history", {
@@ -438,8 +520,16 @@ export async function GET(req: NextRequest) {
                     emoji: true,
                     username: true
                   }
+                },
+                attachments: {
+                  columns: {
+                    url: true,
+                    filename: true,
+                    contentType: true,
+                    size: true
+                  }
                 }
-              }
+              },
             }
           },
           orderBy: asc(directMessages.createdAt)
@@ -448,7 +538,13 @@ export async function GET(req: NextRequest) {
           content: msg.messageContent.content,
           username: msg.messageContent.username,
           createdAt: msg.createdAt,
-          reactions: msg.messageContent.reactions
+          reactions: msg.messageContent.reactions,
+          attachments: msg.messageContent.attachments.map(attachment => ({
+            key: attachment.url,
+            filename: attachment.filename,
+            contentType: attachment.contentType,
+            size: attachment.size
+          }))
         })))
 
         socket.emit("thread-history", {

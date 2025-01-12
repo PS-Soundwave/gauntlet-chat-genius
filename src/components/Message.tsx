@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useSocket } from '@/contexts/SocketContext'
 import { useChannel } from '@/contexts/ChannelContext'
+import { Paperclip } from 'lucide-react'
 
 type MessageProps = {
   username: string
@@ -14,6 +15,12 @@ type MessageProps = {
   messageId: number
   activeEmojiPicker: number | null
   setActiveEmojiPicker: (messageId: number | null) => void
+  attachments?: {
+    key: string
+    filename: string
+    contentType: string
+    size: number
+  }[]
 }
 
 const commonEmojis = ["👍", "👎", "❤️", "😂", "😮", "😢", "🎉", "💯", "🔥"]
@@ -26,7 +33,8 @@ export function Message({
   reactions: initialReactions = [],
   messageId,
   activeEmojiPicker,
-  setActiveEmojiPicker
+  setActiveEmojiPicker,
+  attachments
 }: MessageProps) {
   const { socket } = useSocket()
   const { currentUser } = useChannel()
@@ -72,6 +80,10 @@ export function Message({
     })
   }
 
+  const getDownloadUrl = (attachment: { key: string, filename: string }) => {
+    return `/api/download?key=${encodeURIComponent(attachment.key)}&filename=${encodeURIComponent(attachment.filename)}`
+  }
+
   return (
     <div 
       className={`relative mb-2 p-2 rounded bg-white hover:bg-gray-50 ${onClick ? "cursor-pointer" : ""} ${className}`}
@@ -81,6 +93,23 @@ export function Message({
         {username}
       </div>
       <div>{content}</div>
+      
+      {attachments && attachments.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {attachments.map((attachment, index) => (
+            <a
+              key={index}
+              href={getDownloadUrl(attachment)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 bg-gray-100 hover:bg-gray-200 rounded px-2 py-1 text-sm"
+            >
+              <Paperclip className="w-4 h-4" />
+              <span className="truncate max-w-[200px]">{attachment.filename}</span>
+            </a>
+          ))}
+        </div>
+      )}
       
       <div className="flex flex-wrap gap-1 mt-1">
         {Object.entries(reactionTable).map(([emoji, { count, userReacted }]) => (
@@ -108,7 +137,7 @@ export function Message({
           +
         </button>
       </div>
-      
+
       {showEmojiPicker && (
         <div 
           className="absolute mt-1 bg-white shadow-lg rounded-lg p-2 flex gap-1 z-10"

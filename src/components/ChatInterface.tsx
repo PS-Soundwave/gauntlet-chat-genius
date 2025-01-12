@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { colors } from "@/utils/colors"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,6 +9,7 @@ import { useSocket } from "@/contexts/SocketContext"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { MessageThread } from "./MessageThread"
 import { Message } from "@/components/Message"
+import { Upload, Paperclip } from 'lucide-react'
 
 type Message = {
   id: number
@@ -21,15 +22,31 @@ type Message = {
     emoji: string
     username: string
   }[]
+  attachments: {
+    key: string
+    filename: string
+    contentType: string
+    size: number
+  }[]
+}
+
+type Attachment = {
+  key: string
+  filename: string
+  contentType: string
+  size: number
 }
 
 export default function ChatInterface() {
-  const { currentChat, setConnectedUsers, setCurrentUser } = useChannel()
+  const { currentChat, setConnectedUsers, setCurrentUser, currentUser } = useChannel()
   const { socket, isConnected } = useSocket()
   const [messages, setMessages] = useState<{ [chatId: string]: Message[] }>({})
   const [inputMessage, setInputMessage] = useState("")
   const [activeThread, setActiveThread] = useState<Message | null>(null)
   const [activeEmojiPicker, setActiveEmojiPicker] = useState<number | null>(null)
+  const [attachments, setAttachments] = useState<Attachment[]>([])
+  const [isUploading, setIsUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   /*const { ref: topLoader, inView: isTopVisible } = useInView({
     threshold: 0,
@@ -124,6 +141,7 @@ export default function ChatInterface() {
       channelId: number, 
       messages: Message[]
     }) => {
+      console.log(data)
       setMessages(prev => ({
         ...prev,
         [data.channelId]: data.messages
@@ -270,23 +288,93 @@ export default function ChatInterface() {
     }
   }, [])
 
-  if (!currentChat) return null
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files?.length) return
+
+    setIsUploading(true)
+    try {
+      const newAttachments = await Promise.all(
+        Array.from(files).map(async (file) => {
+          // Get presigned URL
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              filename: file.name,
+              contentType: file.type
+            })
+          })
+
+          if (!res.ok) {
+            throw new Error(`Failed to get upload URL: ${res.statusText}`)
+          }
+
+          const { url, fields, key } = await res.json()
+
+          // Create form data for upload
+          const formData = new FormData()
+          Object.entries(fields).forEach(([key, value]) => {
+            formData.append(key, value as string)
+          })
+          formData.append('file', file)
+
+          // Upload to S3
+          await fetch(url, {
+            method: 'POST',
+            body: formData
+          })
+
+          // If we get here, upload was successful
+          return {
+            key: key,
+            filename: file.name,
+            contentType: file.type,
+            size: file.size
+          }
+        })
+      )
+
+      setAttachments(prev => [...prev, ...newAttachments])
+    } catch (error) {
+      console.error('Upload failed:', error)
+    } finally {
+      setIsUploading(false)
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index))
+  }
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault()
-    if (inputMessage.trim() && socket && isConnected) {
+    if ((inputMessage.trim() || attachments.length) && socket && isConnected && currentChat) {
       if (currentChat.type === "dm") {
         socket.emit("send-dm", {
           username: currentChat.clerkId,
-          content: inputMessage
+          content: inputMessage,
+          attachments
         })
       } else {
-        socket.emit("send-message", { channelId: currentChat.id, content: inputMessage })
+        socket.emit("send-message", {
+          channelId: currentChat.id,
+          content: inputMessage,
+          attachments
+        })
       }
       setInputMessage("")
+      setAttachments([])
     }
   }
-  
+
+  if (!currentChat) return null
+
+  console.log(messages)
+
   return (
     <div className="flex flex-col h-screen">
       <div className={`${colors.primary} p-4 text-white font-semibold`}>
@@ -295,7 +383,7 @@ export default function ChatInterface() {
       <ScrollArea 
         className={`${colors.secondary} flex-grow p-4`}
       >    
-        {messages[currentChat.type === "dm" ? currentChat.clerkId : currentChat.id]?.filter(message => message.parentId === null).map((message) => (
+        {messages[currentChat.type === "dm" ? `dm-${[currentChat.clerkId, currentUser?.id].sort().join("-")}` : currentChat.id]?.filter(message => message.parentId === null).map((message) => (
           <div key={message.id}>
             <Message
               username={message.username}
@@ -306,6 +394,7 @@ export default function ChatInterface() {
               messageId={message.id}
               activeEmojiPicker={activeEmojiPicker}
               setActiveEmojiPicker={setActiveEmojiPicker}
+              attachments={message.attachments}
             />
             {activeThread && activeThread.id === message.id && (
               <div className="ml-8 mb-4 border-l-2 border-gray-300">
@@ -328,17 +417,51 @@ export default function ChatInterface() {
         ))}
       </ScrollArea>
       
-      <form onSubmit={handleSendMessage} className="flex p-4 bg-gray-300">
-        <Input
-          type="text"
-          value={inputMessage}
-          onChange={(e) => setInputMessage(e.target.value)}
-          className={`flex-grow ${colors.input}`}
-          placeholder={`Message ${currentChat.type === "channel" ? "#" : "@"}${currentChat.name}`}
-        />
-        <Button type="submit" className={`${colors.primary} ml-2`}>
-          Send
-        </Button>
+      <form onSubmit={handleSendMessage} className="flex flex-col p-4 bg-gray-300">
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-2">
+            {attachments.map((file, index) => (
+              <div key={index} className="flex items-center gap-1 bg-white rounded px-2 py-1">
+                <span className="text-sm truncate max-w-[200px]">{file.filename}</span>
+                <button
+                  type="button"
+                  onClick={() => removeAttachment(index)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <Input
+            type="text"
+            value={inputMessage}
+            onChange={(e) => setInputMessage(e.target.value)}
+            className={`flex-grow ${colors.input}`}
+            placeholder={`Message ${currentChat.type === "channel" ? "#" : "@"}${currentChat.name}`}
+          />
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileSelect}
+            className="hidden"
+            multiple
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+          >
+            {isUploading ? <Upload className="animate-bounce" /> : <Paperclip />}
+          </Button>
+          <Button type="submit" className={`${colors.primary}`}>
+            Send
+          </Button>
+        </div>
       </form>
     </div>
   )
