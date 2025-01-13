@@ -3,8 +3,9 @@ import { NextRequest } from "next/server"
 import { db } from '@/db'
 import { messageContents, messages, directMessages, messageIds, channels, attachments } from '@/db/schema'
 import { eq, and, or, asc } from 'drizzle-orm'
-import { reactions } from '@/db/schema'
+import { reactions, users as usersTable } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
+import { generateUsername } from "@/utils/username"
 
 interface CustomGlobal {
   io?: SocketIOServer
@@ -15,7 +16,6 @@ const socketServer: CustomGlobal = {}
 interface SocketUser {
   username: string
   clerkId: string
-  email: string
 }
 
 const users = new Map<string, SocketUser>()
@@ -52,16 +52,28 @@ export async function GET(req: NextRequest) {
         const client = await clerkClient()
         const user = await client.users.getUser(payload.sub);
 
-
         if (activeUsers.has(user.id)) {
           socket.emit("auth-fail")
           return
         }
 
+        let [dbUser] = await db.select().from(usersTable).where(eq(usersTable.clerkId, user.id))
+
+        if (!dbUser) {
+          try {
+            [dbUser] = await db.insert(usersTable).values({
+              clerkId: user.id,
+              username: user.username || generateUsername()
+            }).returning()
+          } catch {
+            socket.emit("auth-fail")
+            return
+          }
+        }
+        
         users.set(socket.id, {
-          username: user.username || user.emailAddresses[0].emailAddress,
+          username: dbUser.username,
           clerkId: user.id,
-          email: user.emailAddresses[0].emailAddress
         })
         activeUsers.add(user.id)
 
@@ -72,6 +84,7 @@ export async function GET(req: NextRequest) {
           username: user.username
         }))
         socketServer.io?.emit("users-updated", connectedUsers)
+        socketServer.io?.emit("usernames", await db.select().from(usersTable).then(users => users.reduce((acc, user) => ({ ...acc, [user.clerkId]: user.username }), {})))
       })
       
       socket.on("get-user", () => {
@@ -80,6 +93,36 @@ export async function GET(req: NextRequest) {
         if (!user) return
 
         socket.emit("user-assigned", { username: user.username, id: user.clerkId })
+      });
+
+      socket.on("change-username", async (data: { newUsername: string }) => {
+        const user = users.get(socket.id)
+        if (!user) return
+
+        try {
+          // Update the username in the database
+          await db.update(usersTable)
+            .set({ username: data.newUsername })
+            .where(eq(usersTable.clerkId, user.clerkId))
+            .returning()
+
+          // Update the username in memory
+          users.set(socket.id, {
+            ...user,
+            username: data.newUsername
+          })
+          
+          // Notify the user of successful update
+          socket.emit("username-changed", { username: data.newUsername })
+
+          // Notify all connected users of the change
+          const connectedUsers = Array.from(users.values()).map(user => ({
+            id: user.clerkId,
+            username: user.username
+          }))
+          socketServer.io?.emit("users-updated", connectedUsers)
+          socketServer.io?.emit("usernames", await db.select().from(usersTable).then(users => users.reduce((acc, user) => ({ ...acc, [user.clerkId]: user.username }), {})))
+        } catch {}
       });
 
       socket.on("join-chat", async (data: { channelId: number }) => {
@@ -93,8 +136,7 @@ export async function GET(req: NextRequest) {
           with: {
             messageContent: {
               columns: {
-                content: true,
-                username: true
+                content: true
               },
               with: {
                 reactions: {
@@ -112,13 +154,18 @@ export async function GET(req: NextRequest) {
                   }
                 }
               }
+            },
+            user: {
+              columns: {
+                username: true
+              }
             }
           },
           orderBy: asc(messages.createdAt)
         }).then(messages => messages.map(msg => ({
           id: msg.id,
           content: msg.messageContent.content,
-          username: msg.messageContent.username,
+          username: msg.userId,
           createdAt: msg.createdAt,
           parentId: msg.parentId,
           reactions: msg.messageContent.reactions,
@@ -154,8 +201,7 @@ export async function GET(req: NextRequest) {
           with: {
             messageContent: {
               columns: {
-                content: true,
-                username: true
+                content: true
               },
               with: {
                 reactions: {
@@ -173,13 +219,18 @@ export async function GET(req: NextRequest) {
                   }
                 }
               }
+            },
+            user: {
+              columns: {
+                username: true
+              }
             }
           },
           orderBy: asc(directMessages.createdAt)
         }).then(messages => messages.map(msg => ({
           id: msg.id,
           content: msg.messageContent.content,
-          username: msg.messageContent.username,
+          username: msg.userId,
           createdAt: msg.createdAt,
           parentId: msg.parentId,
           reactions: msg.messageContent.reactions,
@@ -246,8 +297,7 @@ export async function GET(req: NextRequest) {
         // Create message content
         const [newMessageContent] = await db.insert(messageContents)
           .values({
-            content: message.content,
-            username: user.username
+            content: message.content
           })
           .returning()
 
@@ -269,6 +319,7 @@ export async function GET(req: NextRequest) {
             id: newMessageId.id,
             type: 'direct_message',
             contentId: newMessageContent.id,
+            userId: user.clerkId,
             participant1,
             participant2,
             parentId: message.parentId || null
@@ -284,14 +335,16 @@ export async function GET(req: NextRequest) {
             ...newMessageContent,
             ...newMessage,
             channelId: chatId,
-            attachments: message.attachments
+            attachments: message.attachments,
+            username: user.clerkId
           })
         } else {
           socketServer.io?.to(chatId).emit("new-message", {
             ...newMessageContent,
             ...newMessage,
             channelId: chatId,
-            attachments: message.attachments
+            attachments: message.attachments,
+            username: user.clerkId
           })
         }
       })
@@ -332,8 +385,7 @@ export async function GET(req: NextRequest) {
         // Create message content
         const [newMessageContent] = await db.insert(messageContents)
           .values({
-            content: message.content,
-            username: user.username
+            content: message.content
           })
           .returning()
 
@@ -354,6 +406,7 @@ export async function GET(req: NextRequest) {
           .values({
             id: newMessageId.id,
             type: 'message',
+            userId: user.clerkId,
             contentId: newMessageContent.id,
             channelId: message.channelId,
             parentId: message.parentId || null
@@ -364,14 +417,16 @@ export async function GET(req: NextRequest) {
           socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
             ...newMessageContent,
             ...newMessage,
-            attachments: message.attachments
+            attachments: message.attachments,
+            username: user.clerkId
           })
         } else {
           socketServer.io?.to(`channel-${message.channelId}`).emit("new-message", {
             ...newMessageContent,
             ...newMessage,
             channelId: message.channelId,
-            attachments: message.attachments
+            attachments: message.attachments,
+            username: user.clerkId
           })
         }
       })
@@ -451,8 +506,7 @@ export async function GET(req: NextRequest) {
           with: {
             messageContent: {
               columns: {
-                content: true,
-                username: true
+                content: true
               },
               with: {
                 reactions: {
@@ -470,13 +524,18 @@ export async function GET(req: NextRequest) {
                   }
                 }
               }
+            },
+            user: {
+              columns: {
+                username: true
+              }
             }
           },
           orderBy: asc(messages.createdAt)
         }).then(messages => messages.map(msg => ({
           id: msg.id,
           content: msg.messageContent.content,
-          username: msg.messageContent.username,
+          username: msg.userId,
           createdAt: msg.createdAt,
           reactions: msg.messageContent.reactions,
           attachments: msg.messageContent.attachments.map(attachment => ({
@@ -511,8 +570,7 @@ export async function GET(req: NextRequest) {
           with: {
             messageContent: {
               columns: {
-                content: true,
-                username: true
+                content: true
               },
               with: {
                 reactions: {
@@ -530,13 +588,18 @@ export async function GET(req: NextRequest) {
                   }
                 }
               },
+            },
+            user: {
+              columns: {
+                username: true
+              }
             }
           },
           orderBy: asc(directMessages.createdAt)
         }).then(messages => messages.map(msg => ({
           id: msg.id,
           content: msg.messageContent.content,
-          username: msg.messageContent.username,
+          username: msg.userId,
           createdAt: msg.createdAt,
           reactions: msg.messageContent.reactions,
           attachments: msg.messageContent.attachments.map(attachment => ({

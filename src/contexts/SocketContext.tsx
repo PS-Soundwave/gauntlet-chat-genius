@@ -59,7 +59,6 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
         socketInitialized = true
     }
 
-    console.log("Socket effect running")
     initSocket()
 
     return () => {

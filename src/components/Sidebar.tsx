@@ -18,6 +18,8 @@ export function Sidebar() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [isAddingChannel, setIsAddingChannel] = useState(false)
   const [newChannelName, setNewChannelName] = useState("")
+  const [isEditingUsername, setIsEditingUsername] = useState(false)
+  const [newUsername, setNewUsername] = useState("")
 
   useEffect(() => {
     if (!socket) return
@@ -26,10 +28,19 @@ export function Sidebar() {
       setChannels(serverChannels)
     })
 
+    console.log("effect running" , socket)
+    socket.on("username-changed", () => {
+      console.log("success")
+      setIsEditingUsername(false)
+      setNewUsername("")
+    })
+
     socket.emit("get-channels")
 
     return () => {
+      console.log("off")
       socket.off("channels")
+      socket.off("username-changed")
     }
   }, [socket])
 
@@ -49,6 +60,13 @@ export function Sidebar() {
       if (currentChat?.type === "channel" && currentChat.id === channelId) {
         setCurrentChat(null)
       }
+    }
+  }
+
+  const handleUsernameChange = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newUsername.trim() && socket) {
+      socket.emit("change-username", { newUsername: newUsername.trim() })
     }
   }
 
@@ -136,6 +154,41 @@ export function Sidebar() {
           ))}
         </div>
       </ScrollArea>
+      <Separator className="my-2" />
+      <div className="mt-auto">
+        <div className="flex justify-between items-center">
+          <div className="text-sm font-semibold">
+            {isEditingUsername ? (
+              <form onSubmit={handleUsernameChange} className="flex gap-2">
+                <Input
+                  value={newUsername}
+                  onChange={(e) => setNewUsername(e.target.value)}
+                  placeholder="New username"
+                  className="h-8"
+                />
+                <Button type="submit" size="sm" className="h-8">
+                  Save
+                </Button>
+              </form>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span>@{currentUser?.username}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setIsEditingUsername(true)
+                    setNewUsername(currentUser?.username || "")
+                  }}
+                  className="h-6 w-6 p-0"
+                >
+                  ✏️
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

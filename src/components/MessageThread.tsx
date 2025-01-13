@@ -36,10 +36,11 @@ type MessageThreadProps = {
   onClose: () => void
   channel: { type: "dm", id: string } | { type: "channel", id: number }
   activeEmojiPicker: number | null
-  setActiveEmojiPicker: (messageId: number | null) => void
+  setActiveEmojiPicker: (messageId: number | null) => void,
+  userTable: { [key: string]: string }
 }
 
-export function MessageThread({ parentMessage, onClose, channel, activeEmojiPicker, setActiveEmojiPicker }: MessageThreadProps) {
+export function MessageThread({ userTable, parentMessage, onClose, channel, activeEmojiPicker, setActiveEmojiPicker }: MessageThreadProps) {
   const [messages, setMessages] = useState<ThreadMessage[]>([])
   const [inputMessage, setInputMessage] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -174,7 +175,7 @@ export function MessageThread({ parentMessage, onClose, channel, activeEmojiPick
           {messages.map((message) => (
             <Message
               key={message.id}
-              username={message.username}
+              username={userTable[message.username]}
               content={message.content}
               className="mb-4"
               reactions={message.reactions}

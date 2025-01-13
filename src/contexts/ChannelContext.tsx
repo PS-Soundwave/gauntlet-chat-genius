@@ -1,6 +1,6 @@
 "use client"
 
-import React, { createContext, useState, useContext } from "react"
+import React, { createContext, useState, useContext, SetStateAction } from "react"
 
 type ChatItem = {
   name: string
@@ -14,11 +14,11 @@ type ChatItem = {
 
 type ChannelContextType = {
   currentChat: ChatItem | null
-  setCurrentChat: (chat: ChatItem | null) => void
+  setCurrentChat: (chat: SetStateAction<ChatItem | null>) => void
   connectedUsers: { id: string; username: string }[]
-  setConnectedUsers: (users: { id: string; username: string }[]) => void
+  setConnectedUsers: (users: SetStateAction<{ id: string; username: string }[]>) => void
   currentUser: { username: string, id: string } | null
-  setCurrentUser: (user: { username: string, id: string } | null) => void
+  setCurrentUser: (user: SetStateAction<{ username: string, id: string } | null>) => void
 }
 
 const ChannelContext = createContext<ChannelContextType | undefined>(undefined)

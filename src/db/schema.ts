@@ -11,8 +11,7 @@ export const messageIds = pgTable('message_ids', {
 
 export const messageContents = pgTable('message_contents', {
   id: serial('id').primaryKey(),
-  content: text('content').notNull(),
-  username: text('username').notNull(),
+  content: text('content').notNull()
 })
 
 export const messageContentsRelations = relations(messageContents, ({ many }) => ({
@@ -28,6 +27,9 @@ export const channels = pgTable('channels', {
 export const messages = pgTable('messages', {
   id: integer('id').primaryKey(),
   type: messageTypeEnum().notNull(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.clerkId),
   contentId: integer('content_id')
     .notNull()
     .references(() => messageContents.id),
@@ -49,6 +51,10 @@ export const channelsRelations = relations(channels, ({ many }) => ({
 }))
 
 export const messagesRelations = relations(messages, ({ one, many }) => ({
+  user: one(users, {
+    fields: [messages.userId],
+    references: [users.clerkId]
+  }),
   messageContent: one(messageContents, {
     fields: [messages.contentId],
     references: [messageContents.id]
@@ -81,6 +87,10 @@ export const reactionsRelations = relations(reactions, ({ one }) => ({
   message: one(messageContents, {
     fields: [reactions.messageId],
     references: [messageContents.id]
+  }),
+  user: one(users, {
+    fields: [reactions.username],
+    references: [users.clerkId]
   })
 }))
 
@@ -90,6 +100,9 @@ export const directMessages = pgTable('direct_messages', {
   contentId: integer('content_id')
     .notNull()
     .references(() => messageContents.id),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.clerkId),
   participant1: text('participant1').notNull(),
   participant2: text('participant2').notNull(),
   parentId: integer('parent_id').references((): PgColumn => directMessages.id),
@@ -97,6 +110,10 @@ export const directMessages = pgTable('direct_messages', {
 }, (table) => [check("type", sql`type = 'direct_message'`), foreignKey({ columns: [table.id, table.type], foreignColumns: [messageIds.id, messageIds.type] })])
 
 export const directMessagesRelations = relations(directMessages, ({ one, many }) => ({
+  user: one(users, {
+    fields: [directMessages.userId],
+    references: [users.clerkId]
+  }),
   messageContent: one(messageContents, {
     fields: [directMessages.contentId],
     references: [messageContents.id]
@@ -128,4 +145,15 @@ export const attachmentsRelations = relations(attachments, ({ one }) => ({
     fields: [attachments.messageContentId],
     references: [messageContents.id]
   })
+}))
+
+export const users = pgTable('users', {
+  clerkId: text('clerk_id').notNull().primaryKey(),
+  username: text('username').notNull().unique(),
+})
+
+export const usersRelations = relations(users, ({ many }) => ({
+  messages: many(messages),
+  reactions: many(reactions),
+  directMessages: many(directMessages)
 }))

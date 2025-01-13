@@ -46,6 +46,7 @@ export default function ChatInterface() {
   const [activeEmojiPicker, setActiveEmojiPicker] = useState<number | null>(null)
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [isUploading, setIsUploading] = useState(false)
+  const [userTable, setUserTable] = useState<{ [key: string]: string }>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   /*const { ref: topLoader, inView: isTopVisible } = useInView({
@@ -97,6 +98,10 @@ export default function ChatInterface() {
 
     socket.on("users-updated", (users: { id: string; username: string }[]) => {
       setConnectedUsers(users)
+    })
+
+    socket.on("usernames", (usernames: { [key: string]: string }) => {
+      setUserTable(usernames)
     })
 
     /*socketRef.current.on("chat-history-back", (data: { 
@@ -196,6 +201,10 @@ export default function ChatInterface() {
       setCurrentUser({ username: data.username, id: data.id })
     })
 
+    socket.on("username-changed", (data: { username: string }) => {
+      setCurrentUser(prev => prev ? { ...prev, username: data.username } : null)
+    })
+
     socket.emit("get-user")
 
     return () => {
@@ -203,7 +212,9 @@ export default function ChatInterface() {
       socket.off("chat-history")
       socket.off("new-message")
       socket.off("user-assigned")
+      socket.off("username-changed")
       socket.off("reaction-updated")
+      socket.off("usernames")
     }
   }, [socket, setConnectedUsers, setCurrentUser])
 
@@ -386,7 +397,7 @@ export default function ChatInterface() {
         {messages[currentChat.type === "dm" ? `dm-${[currentChat.clerkId, currentUser?.id].sort().join("-")}` : currentChat.id]?.filter(message => message.parentId === null).map((message) => (
           <div key={message.id}>
             <Message
-              username={message.username}
+              username={userTable[message.username]}
               content={message.content}
               onClick={() => setActiveThread(activeThread?.id === message.id ? null : message)}
               data-message-id={message.id}
@@ -399,6 +410,7 @@ export default function ChatInterface() {
             {activeThread && activeThread.id === message.id && (
               <div className="ml-8 mb-4 border-l-2 border-gray-300">
                 <MessageThread
+                  userTable={userTable}
                   parentMessage={activeThread}
                   onClose={() => setActiveThread(null)}
                   channel={currentChat.type === "dm" ? {
