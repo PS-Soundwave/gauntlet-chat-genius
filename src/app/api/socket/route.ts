@@ -6,6 +6,9 @@ import { eq, and, or, asc } from 'drizzle-orm'
 import { reactions, users as usersTable } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
 import { generateUsername } from "@/utils/username"
+import { generateEmbedding } from "@/lib/embeddings"
+import { upsertMessage, CHANNEL_TO_VECTORIZE, QUERY_CHANNEL } from "@/lib/pinecone"
+import { answerWithContext } from "@/lib/rag"
 
 interface CustomGlobal {
   io?: SocketIOServer
@@ -20,6 +23,30 @@ interface SocketUser {
 
 const users = new Map<string, SocketUser>()
 const activeUsers = new Set<string>()
+
+// Add this function to handle message vectorization
+async function vectorizeAndStoreMessage(messageData: {
+  id: number,
+  content: string,
+  userId: string,
+  channelId: number,
+  createdAt: Date,
+  parentId: number | null
+}) {
+  if (messageData.channelId !== CHANNEL_TO_VECTORIZE) {
+    return
+  }
+
+  try {
+    const embedding = await generateEmbedding(messageData.content)
+    await upsertMessage({
+      ...messageData,
+      embedding
+    })
+  } catch (error) {
+    console.error('Error vectorizing message:', error)
+  }
+}
 
 export async function GET(req: NextRequest) {
   const { userId, sessionId } = getAuth(req)
@@ -363,6 +390,60 @@ export async function GET(req: NextRequest) {
         const user = users.get(socket.id)
         if (!user) return
 
+        // Handle query channel separately
+        if (message.channelId === QUERY_CHANNEL) {
+          try {
+            const { answer, relevantMessages } = await answerWithContext(message.content)
+            
+            // Format the response as a regular message
+            const responseMessage = {
+              id: Date.now(), // Use timestamp as temporary ID
+              content: answer,
+              channelId: message.channelId,
+              username: user.clerkId, // Make it appear from the same user
+              createdAt: new Date(),
+              parentId: null,
+              attachments: [],
+              reactions: []
+            }
+
+            // Send the response only to the user who asked
+            socket.emit("new-message", responseMessage)
+
+            // Also send the relevant messages as system messages
+            const contextMessage = {
+              id: Date.now() + 1,
+              content: "Here are the relevant messages I found:\n\n" + 
+                      relevantMessages.map(msg => 
+                        `[${new Date(msg.createdAt).toLocaleString()}] ${msg.userId}:\n${msg.content}\n`
+                      ).join("\n"),
+              channelId: message.channelId,
+              username: user.clerkId,
+              createdAt: new Date(),
+              parentId: null,
+              attachments: [],
+              reactions: []
+            }
+
+            socket.emit("new-message", contextMessage)
+            return
+          } catch (error) {
+            console.error('Error processing query:', error)
+            const errorMessage = {
+              id: Date.now(),
+              content: "Sorry, I encountered an error processing your query.",
+              channelId: message.channelId,
+              username: user.clerkId,
+              createdAt: new Date(),
+              parentId: null,
+              attachments: [],
+              reactions: []
+            }
+            socket.emit("new-message", errorMessage)
+            return
+          }
+        }
+
         // If there's a parentId, verify it belongs to this channel
         if (message.parentId) {
           const parentMessage = await db.query.messages.findFirst({
@@ -412,6 +493,18 @@ export async function GET(req: NextRequest) {
             parentId: message.parentId || null
           })
           .returning()
+
+        // Vectorize if it's in the vectorize channel
+        if (message.channelId === CHANNEL_TO_VECTORIZE) {
+          await vectorizeAndStoreMessage({
+            id: newMessage.id,
+            content: message.content,
+            userId: user.clerkId,
+            channelId: message.channelId,
+            createdAt: newMessage.createdAt ?? new Date(),
+            parentId: message.parentId || null
+          })
+        }
 
         if (message.parentId) {
           socketServer.io?.to(`thread-${message.parentId}`).emit("new-thread-message", {
