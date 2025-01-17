@@ -2,12 +2,16 @@ import OpenAI from 'openai'
 import { generateEmbedding } from '../src/lib/embeddings'
 import { upsertMessage } from '../src/lib/pinecone'
 import readline from 'readline'
-
+import dotenv from 'dotenv'
 const START_ID = 200
 const USER_1 = "Raj"
 const USER_2 = "Aki"
 const USER_1_ID = "user_jkl765"
 const USER_2_ID = "user_mno876"
+
+if (!process.env.OPENAI_API_KEY) {
+  dotenv.config()
+}
 
 if (!process.env.OPENAI_API_KEY) {
   throw new Error('OPENAI_API_KEY is not defined')
