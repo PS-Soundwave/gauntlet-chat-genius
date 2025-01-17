@@ -1,5 +1,5 @@
 import { relations, sql } from 'drizzle-orm'
-import { pgTable, text, timestamp, integer, primaryKey, serial, pgEnum, check, foreignKey, unique } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, integer, primaryKey, serial, pgEnum, check, foreignKey, unique, boolean } from 'drizzle-orm/pg-core'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 
 export const messageTypeEnum = pgEnum('message_type', ['message', 'direct_message'])
@@ -155,5 +155,23 @@ export const users = pgTable('users', {
 export const usersRelations = relations(users, ({ many }) => ({
   messages: many(messages),
   reactions: many(reactions),
-  directMessages: many(directMessages)
+  directMessages: many(directMessages),
+  aiConversations: many(aiConversations)
+}))
+
+export const aiConversations = pgTable('ai_conversations', {
+  id: serial('id').primaryKey(),
+  userId: text('user_id')
+    .notNull()
+    .references(() => users.clerkId),
+  content: text('content').notNull(),
+  isAiResponse: boolean('is_ai_response').notNull(),
+  createdAt: timestamp('created_at').defaultNow()
+})
+
+export const aiConversationsRelations = relations(aiConversations, ({ one }) => ({
+  user: one(users, {
+    fields: [aiConversations.userId],
+    references: [users.clerkId]
+  })
 }))

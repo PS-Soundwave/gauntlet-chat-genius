@@ -1,13 +1,13 @@
 import { Server as SocketIOServer } from "socket.io"
 import { NextRequest } from "next/server"
 import { db } from '@/db'
-import { messageContents, messages, directMessages, messageIds, channels, attachments } from '@/db/schema'
+import { messageContents, messages, directMessages, messageIds, channels, attachments, aiConversations } from '@/db/schema'
 import { eq, and, or, asc } from 'drizzle-orm'
 import { reactions, users as usersTable } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
 import { generateUsername } from "@/utils/username"
 import { generateEmbedding } from "@/lib/embeddings"
-import { upsertMessage, CHANNEL_TO_VECTORIZE, QUERY_CHANNEL } from "@/lib/pinecone"
+import { upsertMessage, CHANNEL_TO_VECTORIZE } from "@/lib/pinecone"
 import { answerWithContext } from "@/lib/rag"
 
 interface CustomGlobal {
@@ -31,21 +31,29 @@ async function vectorizeAndStoreMessage(messageData: {
   userId: string,
   channelId: number,
   createdAt: Date,
-  parentId: number | null
+  parentId: number | null,
+  username: string,
+  channelName: string
 }) {
   if (messageData.channelId !== CHANNEL_TO_VECTORIZE) {
     return
   }
 
-  try {
-    const embedding = await generateEmbedding(messageData.content)
-    await upsertMessage({
-      ...messageData,
-      embedding
-    })
-  } catch (error) {
-    console.error('Error vectorizing message:', error)
-  }
+  // Run vectorization in the background
+  (async () => {
+    try {
+      // Include username and channel in the content to be vectorized
+      const enrichedContent = `[Channel: ${messageData.channelName}] ${messageData.username}: ${messageData.content}`
+      const embedding = await generateEmbedding(enrichedContent)
+      await upsertMessage({
+        ...messageData,
+        content: enrichedContent,
+        embedding
+      })
+    } catch (error) {
+      console.error('Error vectorizing message:', error)
+    }
+  })()
 }
 
 export async function GET(req: NextRequest) {
@@ -126,6 +134,12 @@ export async function GET(req: NextRequest) {
         const user = users.get(socket.id)
         if (!user) return
 
+        // Prevent usernames from containing the AI special character
+        if (data.newUsername.includes('⚡')) {
+          socket.emit("username-changed", { error: "Username cannot contain ⚡ as it is reserved for the AI." })
+          return
+        }
+
         try {
           // Update the username in the database
           await db.update(usersTable)
@@ -157,6 +171,29 @@ export async function GET(req: NextRequest) {
         if (!user) return
 
         socket.join(`channel-${data.channelId}`)
+
+        // Handle AI Assistant channel specially
+        if (data.channelId === -1) {
+          const aiMessages = await db.query.aiConversations.findMany({
+            where: eq(aiConversations.userId, user.clerkId),
+            orderBy: asc(aiConversations.createdAt)
+          })
+
+          socket.emit("chat-history", {
+            channelId: data.channelId,
+            messages: aiMessages.map(msg => ({
+              id: msg.id,
+              content: msg.content,
+              username: msg.isAiResponse ? "ai" : msg.userId,
+              createdAt: msg.createdAt,
+              parentId: null,
+              channelId: -1,
+              reactions: [],
+              attachments: []
+            }))
+          })
+          return
+        }
 
         const chatMessages = await db.query.messages.findMany({
           where: eq(messages.channelId, data.channelId),
@@ -390,60 +427,155 @@ export async function GET(req: NextRequest) {
         const user = users.get(socket.id)
         if (!user) return
 
-        // Handle query channel separately
-        if (message.channelId === QUERY_CHANNEL) {
+        // Handle AI Assistant channel specially
+        if (message.channelId === -1) {
           try {
-            const { answer, relevantMessages } = await answerWithContext(message.content)
-            
-            // Format the response as a regular message
-            const responseMessage = {
-              id: Date.now(), // Use timestamp as temporary ID
-              content: answer,
-              channelId: message.channelId,
-              username: user.clerkId, // Make it appear from the same user
-              createdAt: new Date(),
-              parentId: null,
-              attachments: [],
-              reactions: []
-            }
+            // Store and echo user's question immediately
+            const [userQuestion] = await db.insert(aiConversations)
+              .values({
+                userId: user.clerkId,
+                content: message.content,
+                isAiResponse: false
+              })
+              .returning()
 
-            // Send the response only to the user who asked
-            socket.emit("new-message", responseMessage)
-
-            // Also send the relevant messages as system messages
-            const contextMessage = {
-              id: Date.now() + 1,
-              content: "Here are the relevant messages I found:\n\n" + 
-                      relevantMessages.map(msg => 
-                        `[${new Date(msg.createdAt).toLocaleString()}] ${msg.userId}:\n${msg.content}\n`
-                      ).join("\n"),
-              channelId: message.channelId,
+            // Emit user's message immediately
+            socket.emit("new-message", {
+              id: userQuestion.id,
+              content: userQuestion.content,
               username: user.clerkId,
-              createdAt: new Date(),
+              createdAt: userQuestion.createdAt,
+              channelId: -1,
               parentId: null,
               attachments: [],
               reactions: []
-            }
+            })
 
-            socket.emit("new-message", contextMessage)
+            // Send pending indicator immediately
+            socket.emit("new-message", {
+              id: -2, // Special ID for pending message
+              content: "Thinking...",
+              username: "⚡ai",
+              createdAt: new Date(),
+              channelId: -1,
+              parentId: null,
+              attachments: [],
+              reactions: [],
+              isPending: true
+            })
+
+            // Process AI response asynchronously
+            ;(async () => {
+              try {
+                // Get AI response
+                const { answer, relevantMessages } = await answerWithContext(message.content)
+
+                // Remove pending indicator
+                socket.emit("remove-message", { id: -2 })
+
+                // Store AI's response
+                const [aiResponse] = await db.insert(aiConversations)
+                  .values({
+                    userId: user.clerkId,
+                    content: answer,
+                    isAiResponse: true
+                  })
+                  .returning()
+
+                // Store context as another AI response if there are relevant messages
+                if (relevantMessages.length > 0) {
+                  const contextContent = "Here are the relevant messages I found:\n\n" + 
+                    relevantMessages.map(msg => 
+                      `[${new Date(msg.createdAt).toLocaleString()}] ${msg.userId}:\n${msg.content}\n`
+                    ).join("\n")
+
+                  const [contextMessage] = await db.insert(aiConversations)
+                    .values({
+                      userId: user.clerkId,
+                      content: contextContent,
+                      isAiResponse: true
+                    })
+                    .returning()
+
+                  // Send AI response and context
+                  socket.emit("new-message", {
+                    id: aiResponse.id,
+                    content: aiResponse.content,
+                    username: "⚡ai",
+                    createdAt: aiResponse.createdAt,
+                    channelId: -1,
+                    parentId: null,
+                    attachments: [],
+                    reactions: []
+                  })
+
+                  socket.emit("new-message", {
+                    id: contextMessage.id,
+                    content: contextMessage.content,
+                    username: "⚡ai",
+                    createdAt: contextMessage.createdAt,
+                    channelId: -1,
+                    parentId: null,
+                    attachments: [],
+                    reactions: []
+                  })
+                } else {
+                  // Send just the AI response if no relevant messages
+                  socket.emit("new-message", {
+                    id: aiResponse.id,
+                    content: aiResponse.content,
+                    username: "⚡ai",
+                    createdAt: aiResponse.createdAt,
+                    channelId: -1,
+                    parentId: null,
+                    attachments: [],
+                    reactions: []
+                  })
+                }
+              } catch (error) {
+                console.error('Error processing AI query:', error)
+                // Remove pending indicator
+                socket.emit("remove-message", { id: -2 })
+
+                const [errorMessage] = await db.insert(aiConversations)
+                  .values({
+                    userId: user.clerkId,
+                    content: "Sorry, I encountered an error processing your query.",
+                    isAiResponse: true
+                  })
+                  .returning()
+
+                socket.emit("new-message", {
+                  id: errorMessage.id,
+                  content: errorMessage.content,
+                  username: "⚡ai",
+                  createdAt: errorMessage.createdAt,
+                  channelId: -1,
+                  parentId: null,
+                  attachments: [],
+                  reactions: []
+                })
+              }
+            })()
+
             return
           } catch (error) {
-            console.error('Error processing query:', error)
-            const errorMessage = {
-              id: Date.now(),
-              content: "Sorry, I encountered an error processing your query.",
-              channelId: message.channelId,
-              username: user.clerkId,
+            console.error('Error storing user query:', error)
+            socket.emit("new-message", {
+              id: -1,
+              content: "Sorry, I encountered an error storing your message.",
+              username: "⚡ai",
               createdAt: new Date(),
+              channelId: -1,
               parentId: null,
               attachments: [],
               reactions: []
-            }
-            socket.emit("new-message", errorMessage)
+            })
             return
           }
         }
 
+        // Handle regular channels
         // If there's a parentId, verify it belongs to this channel
         if (message.parentId) {
           const parentMessage = await db.query.messages.findFirst({
@@ -496,11 +628,21 @@ export async function GET(req: NextRequest) {
 
         // Vectorize if it's in the vectorize channel
         if (message.channelId === CHANNEL_TO_VECTORIZE) {
+          // Get channel name
+          const channel = await db.query.channels.findFirst({
+            where: eq(channels.id, message.channelId),
+            columns: {
+              name: true
+            }
+          })
+
           await vectorizeAndStoreMessage({
             id: newMessage.id,
             content: message.content,
             userId: user.clerkId,
+            username: user.username,
             channelId: message.channelId,
+            channelName: channel?.name || 'unknown',
             createdAt: newMessage.createdAt ?? new Date(),
             parentId: message.parentId || null
           })

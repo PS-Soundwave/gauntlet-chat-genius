@@ -138,6 +138,21 @@ export function Sidebar() {
           ))}
         </div>
         <Separator className="my-2" />
+        <div className="mb-4">
+          <h3 className="text-sm font-semibold mb-2">AI Query</h3>
+          <Button
+            variant="ghost"
+            className="w-full justify-start mb-1"
+            onClick={() => setCurrentChat({
+              id: -1,
+              name: "AI Assistant",
+              type: "channel"
+            })}
+          >
+            🤖 AI Assistant
+          </Button>
+        </div>
+        <Separator className="my-2" />
         <div>
           <h3 className="text-sm font-semibold mb-2">Direct Messages</h3>
           {dms.map((dm) => (

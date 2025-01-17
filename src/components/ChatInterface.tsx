@@ -28,6 +28,7 @@ type Message = {
     contentType: string
     size: number
   }[]
+  isPending?: boolean
 }
 
 type Attachment = {
@@ -104,44 +105,6 @@ export default function ChatInterface() {
       setUserTable(usernames)
     })
 
-    /*socketRef.current.on("chat-history-back", (data: { 
-      chatId: string, 
-      messages: Message[],
-      hasMore: boolean 
-    }) => {
-      const viewport = scrollViewportRef.current
-      const firstVisibleMessage = viewport?.querySelector('.message-item')
-      const messageId = messages[currentChat.id]?.[0]?.id
-      const originalTop = firstVisibleMessage?.getBoundingClientRect().top ?? null
-      
-      for (const message of data.messages) {
-        for (const message2 of messages[data.chatId] || []) {
-          if (message2.id === message.id) {
-            console.log("conflict")
-          }
-        }
-      }
-
-      setMessages(prev => {
-        const oldMessages = prev[data.chatId] || [];
-        const newMessages = [...data.messages.reverse(), ...oldMessages];
-        return {
-          ...prev,
-          [data.chatId]: newMessages.slice(-250)
-        };
-      });
-
-      setScrollAnchor({
-        messageId,
-        top: originalTop
-      });
-
-      setHasMore(prev => ({
-        ...prev,
-        [data.chatId]: data.hasMore
-      }));
-    });*/
-
     socket.on("chat-history", (data: { 
       channelId: number, 
       messages: Message[]
@@ -153,43 +116,6 @@ export default function ChatInterface() {
       }));
     });
 
-    /*socketRef.current.on("chat-history-forward", (data: { 
-      chatId: string, 
-      messages: Message[],
-      hasMore: boolean 
-    }) => {
-      const viewport = scrollViewportRef.current
-      const lastVisibleMessage = [...(viewport?.querySelectorAll('.message-item') || [])].pop()
-      const lastVisibleRect = lastVisibleMessage?.getBoundingClientRect()
-
-      for (const message of data.messages) {
-        for (const message2 of messages[data.chatId] || []) {
-          if (message2.id === message.id) {
-            console.log("conflict")
-          }
-        }
-      }
-
-      setMessages(prev => {
-        const oldMessages = prev[data.chatId] || [];
-        const newMessages = [...oldMessages, ...data.messages];
-        return {
-          ...prev,
-          [data.chatId]: newMessages.slice(-250)
-        };
-      });
-
-      setScrollAnchor({
-        messageId: messages[data.chatId]?.at(-1)?.id ?? null,
-        top: lastVisibleRect?.top ?? null
-      });
-      
-      setHasMore(prev => ({
-        ...prev,
-        [data.chatId]: data.hasMore
-      }));
-    });*/
-
     socket.on("new-message", (message: Message) => {
       setMessages(prevMessages => ({
         ...prevMessages,
@@ -197,12 +123,27 @@ export default function ChatInterface() {
       }))
     })
 
+    socket.on("remove-message", (data: { id: number }) => {
+      setMessages(prevMessages => {
+        const newMessages = { ...prevMessages }
+        Object.keys(newMessages).forEach(channelId => {
+          newMessages[channelId] = newMessages[channelId].filter(msg => msg.id !== data.id)
+        })
+        return newMessages
+      })
+    })
+
     socket.on("user-assigned", (data: { username: string, id: string }) => {
       setCurrentUser({ username: data.username, id: data.id })
     })
 
-    socket.on("username-changed", (data: { username: string }) => {
-      setCurrentUser(prev => prev ? { ...prev, username: data.username } : null)
+    socket.on("username-changed", (data: { username?: string, error?: string }) => {
+      if (data.error) {
+        // Handle username error (you might want to add a toast notification here)
+        console.error(data.error)
+      } else if (data.username) {
+        setCurrentUser(prev => prev ? { ...prev, username: data.username! } : null)
+      }
     })
 
     socket.emit("get-user")
@@ -211,6 +152,7 @@ export default function ChatInterface() {
       socket.off("users-updated")
       socket.off("chat-history")
       socket.off("new-message")
+      socket.off("remove-message")
       socket.off("user-assigned")
       socket.off("username-changed")
       socket.off("reaction-updated")
@@ -394,41 +336,70 @@ export default function ChatInterface() {
       <ScrollArea 
         className={`${colors.secondary} flex-grow p-4`}
       >    
-        {messages[currentChat.type === "dm" ? `dm-${[currentChat.clerkId, currentUser?.id].sort().join("-")}` : currentChat.id]?.filter(message => message.parentId === null).map((message) => (
-          <div key={message.id}>
-            <Message
-              username={userTable[message.username]}
-              content={message.content}
-              onClick={() => setActiveThread(activeThread?.id === message.id ? null : message)}
-              data-message-id={message.id}
-              reactions={message.reactions}
-              messageId={message.id}
-              activeEmojiPicker={activeEmojiPicker}
-              setActiveEmojiPicker={setActiveEmojiPicker}
-              attachments={message.attachments}
-            />
-            {activeThread && activeThread.id === message.id && (
-              <div className="ml-8 mb-4 border-l-2 border-gray-300">
-                <MessageThread
-                  userTable={userTable}
-                  parentMessage={activeThread}
-                  onClose={() => setActiveThread(null)}
-                  channel={currentChat.type === "dm" ? {
-                    id: currentChat.clerkId,
-                    type: "dm"
-                  } : {
-                    id: currentChat.id,
-                    type: "channel"
-                  }}
-                  activeEmojiPicker={activeEmojiPicker}
-                  setActiveEmojiPicker={setActiveEmojiPicker}
-                />
+        {currentChat.type === "channel" && currentChat.id === -1 ? (
+          <div className="flex flex-col gap-4">
+            <div className="bg-white p-4 rounded-lg shadow">
+              <h3 className="font-semibold mb-2">🤖 AI Assistant</h3>
+              <p className="text-gray-600">
+                Ask me anything about the conversation history! I can help you find information, summarize discussions, or answer questions about past conversations.
+              </p>
+            </div>
+            {messages[-1]?.map((message) => (
+              <div key={message.id} className={`p-4 rounded-lg ${
+                message.username === currentUser?.id ? 
+                  "bg-blue-100 ml-12" : 
+                  message.isPending ?
+                    "bg-gray-100 mr-12 animate-pulse" :
+                    "bg-white mr-12"
+              }`}>
+                <div className="font-semibold text-sm text-gray-600">
+                  {message.username === currentUser?.id ? 
+                    "You" : 
+                    message.isPending ? 
+                      "AI Assistant (typing...)" : 
+                      "AI Assistant"
+                  }
+                </div>
+                <div className="whitespace-pre-wrap">{message.content}</div>
               </div>
-            )}
+            ))}
           </div>
-        ))}
+        ) : (
+          messages[currentChat.type === "dm" ? `dm-${[currentChat.clerkId, currentUser?.id].sort().join("-")}` : currentChat.id]?.filter(message => message.parentId === null).map((message) => (
+            <div key={message.id}>
+              <Message
+                username={userTable[message.username]}
+                content={message.content}
+                onClick={() => setActiveThread(activeThread?.id === message.id ? null : message)}
+                data-message-id={message.id}
+                reactions={message.reactions}
+                messageId={message.id}
+                activeEmojiPicker={activeEmojiPicker}
+                setActiveEmojiPicker={setActiveEmojiPicker}
+                attachments={message.attachments}
+              />
+              {activeThread && activeThread.id === message.id && (
+                <div className="ml-8 mb-4 border-l-2 border-gray-300">
+                  <MessageThread
+                    userTable={userTable}
+                    parentMessage={activeThread}
+                    onClose={() => setActiveThread(null)}
+                    channel={currentChat.type === "dm" ? {
+                      id: currentChat.clerkId,
+                      type: "dm"
+                    } : {
+                      id: currentChat.id,
+                      type: "channel"
+                    }}
+                    activeEmojiPicker={activeEmojiPicker}
+                    setActiveEmojiPicker={setActiveEmojiPicker}
+                  />
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </ScrollArea>
-      
       <form onSubmit={handleSendMessage} className="flex flex-col p-4 bg-gray-300">
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
@@ -452,27 +423,38 @@ export default function ChatInterface() {
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
             className={`flex-grow ${colors.input}`}
-            placeholder={`Message ${currentChat.type === "channel" ? "#" : "@"}${currentChat.name}`}
+            placeholder={currentChat.type === "channel" && currentChat.id === -1 ? 
+              "Ask me anything about the conversation history..." : 
+              `Message ${currentChat.type === "channel" ? "#" : "@"}${currentChat.name}`
+            }
           />
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileSelect}
-            className="hidden"
-            multiple
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-          >
-            {isUploading ? <Upload className="animate-bounce" /> : <Paperclip />}
-          </Button>
-          <Button type="submit" className={`${colors.primary}`}>
-            Send
-          </Button>
+          {currentChat.type === "channel" && currentChat.id === -1 ? (
+            <Button type="submit" className={`${colors.primary}`}>
+              Ask
+            </Button>
+          ) : (
+            <>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+                multiple
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+              >
+                {isUploading ? <Upload className="animate-bounce" /> : <Paperclip />}
+              </Button>
+              <Button type="submit" className={`${colors.primary}`}>
+                Send
+              </Button>
+            </>
+          )}
         </div>
       </form>
     </div>

@@ -9,8 +9,7 @@
     "lint": "next lint",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
-    "seed:conversation": "tsx scripts/seed-conversation.ts",
-    "query:conversation": "tsx scripts/query-conversation.ts"
+    "seed:conversation": "tsx scripts/seed-conversation.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.726.1",
