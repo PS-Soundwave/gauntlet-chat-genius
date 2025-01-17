@@ -39,6 +39,10 @@ async function vectorizeAndStoreMessage(messageData: {
     return
   }
 
+  if (messageData.content.trim() === '') {
+    return
+  }
+
   // Run vectorization in the background
   (async () => {
     try {
