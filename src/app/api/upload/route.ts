@@ -4,6 +4,8 @@ import { NextRequest } from 'next/server'
 import { nanoid } from 'nanoid'
 import { currentUser } from '@clerk/nextjs/server'
 import { processPdf } from '@/lib/pdf'
+import { db } from '@/db'
+import { files } from '@/db/schema'
 
 export async function POST(req: NextRequest) {
   const user = await currentUser()
@@ -27,10 +29,18 @@ export async function POST(req: NextRequest) {
       ContentType: file.type,
     }))
 
+    // Store file metadata
+    await db.insert(files).values({
+      key,
+      filename: file.name,
+      contentType: file.type,
+      size: buffer.length
+    })
+
     // If it's a PDF, process it
     if (file.type === 'application/pdf') {
       try {
-        await processPdf(file)
+        await processPdf(file, key, file.name)
       } catch (error) {
         console.error('PDF processing error:', error)
         // Don't fail the upload if PDF processing fails

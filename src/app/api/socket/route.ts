@@ -1,13 +1,13 @@
 import { Server as SocketIOServer } from "socket.io"
 import { NextRequest } from "next/server"
 import { db } from '@/db'
-import { messageContents, messages, directMessages, messageIds, channels, attachments, aiConversations } from '@/db/schema'
-import { eq, and, or, asc } from 'drizzle-orm'
+import { messageContents, messages, directMessages, messageIds, channels, attachments, aiConversations, files, aiConversationAttachments } from '@/db/schema'
+import { eq, and, or, asc, inArray } from 'drizzle-orm'
 import { reactions, users as usersTable } from '@/db/schema'
 import { clerkClient, getAuth, verifyToken } from "@clerk/nextjs/server"
 import { generateUsername } from "@/utils/username"
 import { generateEmbedding } from "@/lib/embeddings"
-import { upsertMessage, CHANNEL_TO_VECTORIZE } from "@/lib/pinecone"
+import { upsertMessage } from "@/lib/pinecone"
 import { answerWithContext } from "@/lib/rag"
 
 interface CustomGlobal {
@@ -35,7 +35,7 @@ async function vectorizeAndStoreMessage(messageData: {
   username: string,
   channelName: string
 }) {
-  if (messageData.channelId !== CHANNEL_TO_VECTORIZE) {
+  if (messageData.channelId === -1) {
     return
   }
 
@@ -176,6 +176,13 @@ export async function GET(req: NextRequest) {
         if (data.channelId === -1) {
           const aiMessages = await db.query.aiConversations.findMany({
             where: eq(aiConversations.userId, user.clerkId),
+            with: {
+              attachments: {
+                with: {
+                  file: true
+                }
+              }
+            },
             orderBy: asc(aiConversations.createdAt)
           })
 
@@ -184,12 +191,17 @@ export async function GET(req: NextRequest) {
             messages: aiMessages.map(msg => ({
               id: msg.id,
               content: msg.content,
-              username: msg.isAiResponse ? "ai" : msg.userId,
+              username: msg.isAiResponse ? "⚡ai" : msg.userId,
               createdAt: msg.createdAt,
               parentId: null,
               channelId: -1,
               reactions: [],
-              attachments: []
+              attachments: msg.attachments.map(att => ({
+                key: att.file.key,
+                filename: att.file.filename,
+                contentType: att.file.contentType,
+                size: att.file.size
+              }))
             }))
           })
           return
@@ -255,7 +267,6 @@ export async function GET(req: NextRequest) {
         
         const chatId = `dm-${participant1}-${participant2}`
         
-        console.log("Joining DM chatId:", chatId)
         socket.join(chatId)
         const chatMessages = await db.query.directMessages.findMany({
           where: and(
@@ -335,7 +346,7 @@ export async function GET(req: NextRequest) {
         if (!user) return
 
         const [participant1, participant2] = [user.clerkId, message.username].sort()
-        console.log(message)
+        
         // If there's a parentId, verify it belongs to this DM conversation
         if (message.parentId) {
           const parentMessage = await db.query.directMessages.findFirst({
@@ -468,7 +479,7 @@ export async function GET(req: NextRequest) {
             ;(async () => {
               try {
                 // Get AI response
-                const { answer, relevantMessages } = await answerWithContext(message.content)
+                const { answer, attachments } = await answerWithContext(message.content)
 
                 // Remove pending indicator
                 socket.emit("remove-message", { id: -2 })
@@ -482,56 +493,36 @@ export async function GET(req: NextRequest) {
                   })
                   .returning()
 
-                // Store context as another AI response if there are relevant messages
-                if (relevantMessages.length > 0) {
-                  const contextContent = "Here are the relevant messages I found:\n\n" + 
-                    relevantMessages.map(msg => 
-                      `[${new Date(msg.createdAt).toLocaleString()}] ${msg.userId}:\n${msg.content}\n`
-                    ).join("\n")
-
-                  const [contextMessage] = await db.insert(aiConversations)
-                    .values({
-                      userId: user.clerkId,
-                      content: contextContent,
-                      isAiResponse: true
-                    })
-                    .returning()
-
-                  // Send AI response and context
-                  socket.emit("new-message", {
-                    id: aiResponse.id,
-                    content: aiResponse.content,
-                    username: "⚡ai",
-                    createdAt: aiResponse.createdAt,
-                    channelId: -1,
-                    parentId: null,
-                    attachments: [],
-                    reactions: []
-                  })
-
-                  socket.emit("new-message", {
-                    id: contextMessage.id,
-                    content: contextMessage.content,
-                    username: "⚡ai",
-                    createdAt: contextMessage.createdAt,
-                    channelId: -1,
-                    parentId: null,
-                    attachments: [],
-                    reactions: []
-                  })
-                } else {
-                  // Send just the AI response if no relevant messages
-                  socket.emit("new-message", {
-                    id: aiResponse.id,
-                    content: aiResponse.content,
-                    username: "⚡ai",
-                    createdAt: aiResponse.createdAt,
-                    channelId: -1,
-                    parentId: null,
-                    attachments: [],
-                    reactions: []
-                  })
+                // Store attachments if any
+                if (attachments?.length) {
+                  await db.insert(aiConversationAttachments)
+                    .values(attachments.map(key => ({
+                      conversationId: aiResponse.id,
+                      fileKey: key
+                    })))
                 }
+
+                // Fetch file metadata for attachments
+                const fileMetadata = attachments?.length 
+                  ? await db.select().from(files).where(inArray(files.key, attachments))
+                  : []
+                console.log(fileMetadata)
+                // Send the AI response with attachments if available
+                socket.emit("new-message", {
+                  id: aiResponse.id,
+                  content: aiResponse.content,
+                  username: "⚡ai",
+                  createdAt: aiResponse.createdAt,
+                  channelId: -1,
+                  parentId: null,
+                  attachments: fileMetadata.map(file => ({
+                    key: file.key,
+                    filename: file.filename,
+                    contentType: file.contentType,
+                    size: file.size
+                  })),
+                  reactions: []
+                })
               } catch (error) {
                 console.error('Error processing AI query:', error)
                 // Remove pending indicator
@@ -626,8 +617,7 @@ export async function GET(req: NextRequest) {
           })
           .returning()
 
-        // Vectorize if it's in the vectorize channel
-        if (message.channelId === CHANNEL_TO_VECTORIZE) {
+        if (message.channelId !== -1) {
           // Get channel name
           const channel = await db.query.channels.findFirst({
             where: eq(channels.id, message.channelId),

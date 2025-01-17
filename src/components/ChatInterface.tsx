@@ -331,23 +331,20 @@ export default function ChatInterface() {
               </p>
             </div>
             {messages[-1]?.map((message) => (
-              <div key={message.id} className={`p-4 rounded-lg ${
-                message.username === currentUser?.id ? 
-                  "bg-blue-100 ml-12" : 
-                  message.isPending ?
-                    "bg-gray-100 mr-12 animate-pulse" :
-                    "bg-white mr-12"
-              }`}>
-                <div className="font-semibold text-sm text-gray-600">
-                  {message.username === currentUser?.id ? 
-                    "You" : 
-                    message.isPending ? 
-                      "AI Assistant (typing...)" : 
-                      "AI Assistant"
-                  }
-                </div>
-                <div className="whitespace-pre-wrap">{message.content}</div>
-              </div>
+              <Message
+                key={message.id}
+                username={message.username === currentUser?.id ? "You" : message.isPending ? "AI Assistant (typing...)" : "AI Assistant"}
+                content={message.content}
+                messageId={message.id}
+                attachments={message.attachments}
+                className={`${
+                  message.username === currentUser?.id ? 
+                    "ml-12" : 
+                    message.isPending ?
+                      "mr-12 animate-pulse" :
+                      "mr-12"
+                }`}
+              />
             ))}
           </div>
         ) : (

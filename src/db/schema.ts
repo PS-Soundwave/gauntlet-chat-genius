@@ -169,9 +169,40 @@ export const aiConversations = pgTable('ai_conversations', {
   createdAt: timestamp('created_at').defaultNow()
 })
 
-export const aiConversationsRelations = relations(aiConversations, ({ one }) => ({
+export const aiConversationsRelations = relations(aiConversations, ({ one, many }) => ({
   user: one(users, {
     fields: [aiConversations.userId],
     references: [users.clerkId]
+  }),
+  attachments: many(aiConversationAttachments)
+}))
+
+export const aiConversationAttachments = pgTable('ai_conversation_attachments', {
+  id: serial('id').primaryKey(),
+  conversationId: integer('conversation_id')
+    .notNull()
+    .references(() => aiConversations.id, { onDelete: 'cascade' }),
+  fileKey: text('file_key')
+    .notNull()
+    .references(() => files.key),
+  createdAt: timestamp('created_at').defaultNow().notNull()
+})
+
+export const aiConversationAttachmentsRelations = relations(aiConversationAttachments, ({ one }) => ({
+  conversation: one(aiConversations, {
+    fields: [aiConversationAttachments.conversationId],
+    references: [aiConversations.id]
+  }),
+  file: one(files, {
+    fields: [aiConversationAttachments.fileKey],
+    references: [files.key]
   })
 }))
+
+export const files = pgTable('files', {
+  key: text('key').primaryKey(),
+  filename: text('filename').notNull(),
+  contentType: text('content_type').notNull(),
+  size: integer('size').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull()
+})

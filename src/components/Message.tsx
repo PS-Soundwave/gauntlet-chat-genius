@@ -13,8 +13,8 @@ type MessageProps = {
     username: string
   }[]
   messageId: number
-  activeEmojiPicker: number | null
-  setActiveEmojiPicker: (messageId: number | null) => void
+  activeEmojiPicker?: number | null
+  setActiveEmojiPicker?: (messageId: number | null) => void
   attachments?: {
     key: string
     filename: string
@@ -111,34 +111,36 @@ export function Message({
         </div>
       )}
       
-      <div className="flex flex-wrap gap-1 mt-1">
-        {Object.entries(reactionTable).map(([emoji, { count, userReacted }]) => (
+      {setActiveEmojiPicker && (
+        <div className="flex flex-wrap gap-1 mt-1">
+          {Object.entries(reactionTable).map(([emoji, { count, userReacted }]) => (
+            <button
+              key={emoji}
+              onClick={(e) => {
+                e.stopPropagation()
+                handleReaction(emoji)
+              }}
+              className={`text-xs px-2 py-1 rounded-full ${
+                userReacted ? 'bg-blue-100' : 'bg-gray-100'
+              } hover:bg-blue-200 transition-colors`}
+            >
+              {emoji} {count}
+            </button>
+          ))}
+          
           <button
-            key={emoji}
             onClick={(e) => {
               e.stopPropagation()
-              handleReaction(emoji)
+              setActiveEmojiPicker(showEmojiPicker ? null : messageId)
             }}
-            className={`text-xs px-2 py-1 rounded-full ${
-              userReacted ? 'bg-blue-100' : 'bg-gray-100'
-            } hover:bg-blue-200 transition-colors`}
+            className="text-xs px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
           >
-            {emoji} {count}
+            +
           </button>
-        ))}
-        
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            setActiveEmojiPicker(showEmojiPicker ? null : messageId)
-          }}
-          className="text-xs px-2 py-1 rounded-full bg-gray-100 hover:bg-gray-200"
-        >
-          +
-        </button>
-      </div>
+        </div>
+      )}
 
-      {showEmojiPicker && (
+      {showEmojiPicker && setActiveEmojiPicker && (
         <div 
           className="absolute mt-1 bg-white shadow-lg rounded-lg p-2 flex gap-1 z-10"
           onClick={e => {

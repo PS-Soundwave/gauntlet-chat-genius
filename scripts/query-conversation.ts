@@ -1,4 +1,4 @@
-import { answerWithContext } from '../src/lib/rag'
+/*import { answerWithContext } from '../src/lib/rag'
 import dotenv from 'dotenv'
 import readline from 'readline'
 
@@ -58,4 +58,4 @@ async function queryConversation() {
 }
 
 // Run the query script
-queryConversation() 
+queryConversation() */

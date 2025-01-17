@@ -1,6 +1,6 @@
 import OpenAI from 'openai'
 import { generateEmbedding } from '../src/lib/embeddings'
-import { upsertMessage, CHANNEL_TO_VECTORIZE } from '../src/lib/pinecone'
+import { upsertMessage } from '../src/lib/pinecone'
 import readline from 'readline'
 
 const START_ID = 200
@@ -114,9 +114,8 @@ async function vectorizeConversation(conversation: { conversation: Message[] }) 
       id: i + 1 + START_ID,
       content: msg.content,
       userId: msg.role === 'user1' ? USER_1_ID : USER_2_ID,
-      channelId: CHANNEL_TO_VECTORIZE,
+      channelId: 1,
       createdAt: new Date(startTime + i * 15 * 60 * 1000),
-      parentId: null,
       embedding
     })
     
