@@ -86,36 +86,22 @@ export function MessageThread({ userTable, parentMessage, onClose, channel, acti
     try {
       const newAttachments = await Promise.all(
         Array.from(files).map(async (file) => {
-          // Get presigned URL
-          const res = await fetch('/api/upload', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              filename: file.name,
-              contentType: file.type
-            })
-          })
-
-          if (!res.ok) {
-            throw new Error(`Failed to get upload URL: ${res.statusText}`)
-          }
-
-          const { url, fields, key } = await res.json()
-
-          // Create form data for upload
           const formData = new FormData()
-          Object.entries(fields).forEach(([key, value]) => {
-            formData.append(key, value as string)
-          })
           formData.append('file', file)
+          formData.append('filename', file.name)
+          formData.append('contentType', file.type)
 
-          // Upload to S3
-          await fetch(url, {
+          const res = await fetch('/api/upload', {
             method: 'POST',
             body: formData
           })
 
-          // If we get here, upload was successful
+          if (!res.ok) {
+            throw new Error(`Failed to upload file: ${res.statusText}`)
+          }
+
+          const { key } = await res.json()
+
           return {
             key: key,
             filename: file.name,
